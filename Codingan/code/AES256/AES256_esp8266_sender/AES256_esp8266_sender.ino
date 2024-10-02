@@ -73,7 +73,7 @@ bool pairWithReceiver() {
 }
 
 void sendEncryptedMessage() {
-    const char *plaintext = "Hello ESP-8266!";
+    const char *plaintext = "30.40,71.7030.40,71.7030";
     size_t len = strlen(plaintext);
 
     // Buat buffer untuk plaintext dengan padding
@@ -120,7 +120,47 @@ void sendEncryptedMessage() {
     } else {
         Serial.println("Error sending the data");
     }
+}
 
+void encrypt() {
+    const char *plaintext = "rithms";
+    size_t len = strlen(plaintext);
+
+    // Buat buffer untuk plaintext dengan padding
+    uint8_t paddedPlaintext[32]; // Ukuran blok maksimum yang ditambah padding
+    size_t paddedLen;
+
+    addPadding((const uint8_t *)plaintext, len, paddedPlaintext, paddedLen);
+
+    uint8_t ciphertext[32]; // Buffer untuk menyimpan ciphertext
+
+    // Catat waktu sebelum enkripsi menggunakan chrono
+    auto start = high_resolution_clock::now();
+
+    // Proses enkripsi
+    aes256Encrypt(paddedPlaintext, ciphertext, paddedLen, key);
+    // Catat waktu setelah enkripsi menggunakan chrono
+    auto end = high_resolution_clock::now();
+
+    // Hitung durasi enkripsi
+    auto encryptDuration = duration_cast<microseconds>(end - start).count();
+
+    // Tampilkan pesan asli dan ciphertext
+    Serial.print("Original Data: ");
+    Serial.println(plaintext);
+
+    Serial.print("Encrypted Data (Hex): ");
+    for (int i = 0; i < paddedLen; i++) {
+        if (ciphertext[i] < 0x10) Serial.print("0"); // Tambahkan nol jika perlu
+        Serial.print(ciphertext[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // Tampilkan waktu komputasi
+    Serial.print("Encryption Time Computation: ");
+    Serial.print(encryptDuration);
+    Serial.println(" microsecond (μs)");
 }
 
 void setup() {
@@ -139,7 +179,16 @@ void setup() {
 }
 
 void loop() {
-    // Kirim pesan setiap 5 detik
-    sendEncryptedMessage();
-    delay(5000);
+    // // Kirim pesan setiap 5 detik
+    // sendEncryptedMessage();
+    // delay(5000);
+        encrypt();
+        delay(1);     
+        // Masuk ke light sleep setelah mengirim
+        Serial.println("Entering light sleep for 3 seconds...");
+        // Light sleep dengan interval waktu
+        // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
+        WiFi.forceSleepBegin();
+        delay(3000);  // Light sleep selama 5 detik
+        WiFi.forceSleepWake(); // Wake up from light sleep    
 }

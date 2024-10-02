@@ -116,6 +116,42 @@ bool pairWithPeer() {
     return true;
 }
 
+void encrypt() {
+    const char *plaintext = "Hello ESP-8266!!!";
+    size_t len = strlen(plaintext);
+    
+    uint8_t ciphertext[len];
+
+    Serial.print("Original Data: ");
+    Serial.println(plaintext);
+
+    // Catat waktu sebelum enkripsi menggunakan chrono
+    auto start = high_resolution_clock::now();
+
+    // Proses enkripsi
+    chacha20EncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);
+
+    // Catat waktu setelah enkripsi menggunakan chrono
+    auto end = high_resolution_clock::now();
+
+    // Hitung durasi enkripsi
+    auto encryptDuration = duration_cast<microseconds>(end - start).count();
+
+    // Print the encrypted ciphertext
+    Serial.print("Encrypted Data: ");
+    for (int i = 0; i < len; i++) {
+        Serial.print(ciphertext[i]);
+        Serial.print(" ");
+    }
+    Serial.println();
+
+    // Tampilkan waktu komputasi
+    Serial.print("Encryption Time Computation: ");
+    Serial.print(encryptDuration);
+    Serial.println(" mikrosecond (μs)");   
+}
+
+
 void sendEncryptedMessage() {
     const char *plaintext = "Hello ESP-8266!!!";
     size_t len = strlen(plaintext);
@@ -180,23 +216,32 @@ void setup() {
 }
 
 void loop() {
-    unsigned long currentMillis = millis();
+    // unsigned long currentMillis = millis();
 
-    if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
-        Serial.println("Attempting to pair...");
-        isPaired = pairWithPeer();
-        lastPairingAttempt = currentMillis;
-    }
+    // if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
+    //     Serial.println("Attempting to pair...");
+    //     isPaired = pairWithPeer();
+    //     lastPairingAttempt = currentMillis;
+    // }
 
-    if (isPaired) {
-        sendEncryptedMessage();
+    // if (isPaired) {
+    //     sendEncryptedMessage();
+    //     delay(1);     
+    //     // Masuk ke light sleep setelah mengirim
+    //     Serial.println("Entering light sleep for 3 seconds...");
+    //     // Light sleep dengan interval waktu
+    //     // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
+    //     WiFi.forceSleepBegin();
+    //     delay(3000);  // Light sleep selama 5 detik
+    //     WiFi.forceSleepWake(); // Wake up from light sleep
+    // }
+        encrypt();
         delay(1);     
         // Masuk ke light sleep setelah mengirim
-        Serial.println("Entering light sleep for 5 seconds...");
+        Serial.println("Entering light sleep for 3 seconds...");
         // Light sleep dengan interval waktu
         // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
         WiFi.forceSleepBegin();
-        delay(5000);  // Light sleep selama 5 detik
+        delay(3000);  // Light sleep selama 5 detik
         WiFi.forceSleepWake(); // Wake up from light sleep
-    }
 }
