@@ -16,11 +16,10 @@ uint8_t key[32] = {
     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-// Nonce 128-bit (16 byte)
-uint8_t nonce[16] = {
+// Nonce 96-bit (12 byte)
+uint8_t nonce[12] = {
     0x00, 0x00, 0x00, 0x09,
     0x00, 0x00, 0x00, 0x4A,
-    0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00
 };
 
@@ -32,64 +31,57 @@ bool isPaired = false;
 unsigned long lastPairingAttempt = 0;
 const unsigned long pairingInterval = 5000; // Coba pairing setiap 5 detik
 
-// Fungsi untuk inisialisasi state SNOW-V
-void initializeSnowV(uint32_t *LFSR, uint32_t *FSM, const uint8_t *key, const uint8_t *nonce) {
-    // Inisialisasi LFSR dengan key dan nonce (khusus untuk SNOW-V)
-    // Implementasi ini perlu diperhatikan dari referensi SNOW-V spesifikasi
-    // LFSR[0-7] diinisialisasi dengan key
-    for (int i = 0; i < 8; i++) {
-        LFSR[i] = ((uint32_t *)key)[i];
-    }
-    
-    // LFSR[8-11] diinisialisasi dengan nonce
-    for (int i = 8; i < 12; i++) {
-        LFSR[i] = ((uint32_t *)nonce)[i - 8];
-    }
+// Rotasi ke kiri
+#define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
 
-    // FSM diinisialisasi ke 0
-    FSM[0] = FSM[1] = FSM[2] = 0;
+// Fungsi ChaCha quarter round
+void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
+    a += b; d ^= a; d = ROTL(d, 16);
+    c += d; b ^= c; b = ROTL(b, 12);
+    a += b; d ^= a; d = ROTL(d, 8);
+    c += d; b ^= c; b = ROTL(b, 7);
 }
 
-// Fungsi untuk menghasilkan keystream
-void generateSnowVKeystream(uint32_t *LFSR, uint32_t *FSM, uint8_t *keystream, size_t len) {
-    for (size_t i = 0; i < len; i += 4) {
-        // Update FSM dan LFSR berdasarkan aturan SNOW-V
-        // Simulasi untuk 32-bit keystream
-        uint32_t f = (FSM[0] + LFSR[0]) ^ FSM[2];
-        
-        FSM[2] = FSM[1];
-        FSM[1] = FSM[0];
-        FSM[0] = f;
+// Fungsi untuk menghasilkan satu blok 64-byte
+void chacha20Block(uint32_t out[16], const uint32_t in[16]) {
+    memcpy(out, in, sizeof(uint32_t) * 16);
+    for (int i = 0; i < 10; i++) {
+        quarterRound(out[0], out[4], out[ 8], out[12]);
+        quarterRound(out[1], out[5], out[ 9], out[13]);
+        quarterRound(out[2], out[6], out[10], out[14]);
+        quarterRound(out[3], out[7], out[11], out[15]);
 
-        uint32_t s = LFSR[11];
-        for (int j = 11; j > 0; j--) {
-            LFSR[j] = LFSR[j-1];
-        }
-        LFSR[0] = s ^ f;
-
-        // Hasil keystream ditulis ke buffer
-        ((uint32_t *)keystream)[i / 4] = f;
+        quarterRound(out[0], out[5], out[10], out[15]);
+        quarterRound(out[1], out[6], out[11], out[12]);
+        quarterRound(out[2], out[7], out[ 8], out[13]);
+        quarterRound(out[3], out[4], out[ 9], out[14]);
+    }
+    for (int i = 0; i < 16; i++) {
+        out[i] += in[i];
     }
 }
 
-// Fungsi enkripsi XOR menggunakan SNOW-V
-void snowVEncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], const uint8_t nonce[16], uint32_t counter) {
-    uint32_t LFSR[12], FSM[3];
-    
-    // Inisialisasi LFSR dan FSM
-    initializeSnowV(LFSR, FSM, key, nonce);
-    
-    // Buffer untuk menyimpan keystream
-    uint8_t keystream[64];
+// Fungsi enkripsi XOR, bisa digunakan untuk enkripsi dan dekripsi
+void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], const uint8_t nonce[12], uint32_t counter) {
+    uint32_t state[16] = {
+        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574, // Constant
+        ((uint32_t *)key)[0], ((uint32_t *)key)[1], ((uint32_t *)key)[2], ((uint32_t *)key)[3], 
+        ((uint32_t *)key)[4], ((uint32_t *)key)[5], ((uint32_t *)key)[6], ((uint32_t *)key)[7], 
+        counter, 
+        ((uint32_t *)nonce)[0], ((uint32_t *)nonce)[1], ((uint32_t *)nonce)[2]
+    };
+
+    uint8_t block[64];
     size_t i = 0;
 
     while (i < len) {
-        // Generate keystream untuk blok 64 byte
-        generateSnowVKeystream(LFSR, FSM, keystream, 64);
+        uint32_t outputBlock[16];
+        chacha20Block(outputBlock, state);
+        state[12]++;  // Increment counter
 
-        // XOR keystream dengan plaintext untuk enkripsi
         for (size_t j = 0; j < 64 && i < len; ++j, ++i) {
-            output[i] = input[i] ^ keystream[j];
+            block[j] = ((uint8_t *)outputBlock)[j];
+            output[i] = input[i] ^ block[j];  // XOR dengan keystream
         }
     }
 }
@@ -125,7 +117,7 @@ bool pairWithPeer() {
 }
 
 void sendEncryptedMessage() {
-    const char *plaintext = "Hello ESP-8266!";
+    const char *plaintext = "Hello ESP-8266!!!";
     size_t len = strlen(plaintext);
     
     uint8_t ciphertext[len];
@@ -137,15 +129,13 @@ void sendEncryptedMessage() {
     auto start = high_resolution_clock::now();
 
     // Proses enkripsi
-    snowVEncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);
-  
+    chacha20EncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);
 
     // Catat waktu setelah enkripsi menggunakan chrono
     auto end = high_resolution_clock::now();
 
     // Hitung durasi enkripsi
     auto encryptDuration = duration_cast<microseconds>(end - start).count();
-    // delay(2000);
 
     // Print the encrypted ciphertext
     Serial.print("Encrypted Data: ");
@@ -155,10 +145,14 @@ void sendEncryptedMessage() {
     }
     Serial.println();
 
-    // Tampilkan waktu komputasi
-    Serial.print("Encryption Time Computation: ");
-    Serial.print(encryptDuration);
-    Serial.println(" mikrosecond (μs)");
+    // // Tampilkan waktu komputasi
+    // Serial.print("Encryption Time Computation: ");
+    // Serial.print(encryptDuration);
+    // Serial.println(" mikrosecond (μs)");
+
+        // WiFi.forceSleepBegin();
+        // delay(2000);  // Light sleep selama 3 detik
+        // WiFi.forceSleepWake(); // Wake up from light sleep   
 
     // Kirim data terenkripsi
     uint8_t sendStatus = esp_now_send(receiverMAC, ciphertext, len);
@@ -170,7 +164,6 @@ void sendEncryptedMessage() {
     }
 }
 
-
 void setup() {
     Serial.begin(115200);
     
@@ -180,6 +173,7 @@ void setup() {
     } else {
         Serial.println("Normal boot...");
     }
+    
 
     WiFi.mode(WIFI_STA);
 
@@ -189,26 +183,24 @@ void setup() {
     }
 }
 
-
-
 void loop() {
-    // unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();
 
-    // if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
-    //     Serial.println("Attempting to pair...");
-    //     isPaired = pairWithPeer();
-    //     lastPairingAttempt = currentMillis;
-    // }
+    if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
+        Serial.println("Attempting to pair...");
+        isPaired = pairWithPeer();
+        lastPairingAttempt = currentMillis;
+    }
 
-    // if (isPaired) {
+    if (isPaired) {
         sendEncryptedMessage();
-        //delay(1);        
+        delay(1);     
         // Masuk ke light sleep setelah mengirim
-        //Serial.println("Entering light sleep for 3 seconds...");
+        Serial.println("Entering light sleep for 3 seconds...");
         // Light sleep dengan interval waktu
         // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
         WiFi.forceSleepBegin();
-        delay(3000);  // Light sleep selama 5 detik
+        delay(3000);  // Light sleep selama 3 detik
         WiFi.forceSleepWake(); // Wake up from light sleep
-    // }
+    }
 }

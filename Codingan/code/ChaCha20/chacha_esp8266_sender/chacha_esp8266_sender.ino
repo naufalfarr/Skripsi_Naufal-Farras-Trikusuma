@@ -1,12 +1,8 @@
 #include <ESP8266WiFi.h>
-#include <espnow.h>
 #include <cstring>
 #include <stdint.h>
 #include <chrono>
 using namespace std::chrono;
-
-// MAC Address ESP8266 receiver (sesuaikan dengan MAC address receiver Anda)
-uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7};
 
 // Kunci 256-bit (32 byte)
 uint8_t key[32] = {
@@ -25,11 +21,6 @@ uint8_t nonce[12] = {
 
 // Counter
 uint32_t counter = 1;
-
-// Variabel untuk manajemen koneksi
-bool isPaired = false;
-unsigned long lastPairingAttempt = 0;
-const unsigned long pairingInterval = 5000; // Coba pairing setiap 5 detik
 
 // Rotasi ke kiri
 #define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
@@ -86,114 +77,48 @@ void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, c
     }
 }
 
-void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
-    if (sendStatus != 0) {
-        isPaired = false; // Reset pairing status jika pengiriman gagal
-    }
-    Serial.println("------------------------------------------------");
-}
+void encrypt(int index) {
+    const char *plaintext[] = {"Hello ESP-8266!!!", "Hello Worldasdasdint numStrings = sizeof(plaintext) / sizeof(plaintext[0]);int numStrings = sizeof(plaintext) / sizeof(plaintext[0]);int numStrings = sizeof(plaintext) / sizeof(plaintext[0]);", "Test Message!!!!!"};
 
-bool initESPNow() {
-    if (esp_now_init() != 0) { // ESP8266 menggunakan 0 sebagai indikator sukses
-        Serial.println("Error initializing ESP-NOW");
-        return false;
-    }
-    esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);  // Set peran sender
-    esp_now_register_send_cb(onSend);
-    return true;
-}
+    int numStrings = sizeof(plaintext) / sizeof(plaintext[0]);
 
-bool pairWithPeer() {
-    if (esp_now_is_peer_exist(receiverMAC)) {
-        return true; // Peer sudah ada
+    if (index < 0 || index >= numStrings) {
+        Serial.println("Invalid index!");
+        return;
     }
 
-    if (esp_now_add_peer(receiverMAC, ESP_NOW_ROLE_SLAVE, 1, NULL, 0) != 0) {
-        Serial.println("Failed to add peer");
-        return false;
-    }
-    Serial.println("Pairing successful");
-    return true;
-}
-
-void encrypt() {
-    const char *plaintext = "Hello ESP-8266!!!";
-    size_t len = strlen(plaintext);
-    
+    size_t len = strlen(plaintext[index]);
     uint8_t ciphertext[len];
 
-    Serial.print("Original Data: ");
-    Serial.println(plaintext);
+    Serial.print("Plaintext Data: ");
+    Serial.println(plaintext[index]);
+    Serial.print("Plaintext Size: ");
+    Serial.println(len);
 
-    // Catat waktu sebelum enkripsi menggunakan chrono
+    // Record time before encryption
     auto start = high_resolution_clock::now();
 
-    // Proses enkripsi
-    chacha20EncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);
+    // Process encryption
+    chacha20EncryptDecrypt((const uint8_t *)plaintext[index], ciphertext, len, key, nonce, counter);
 
-    // Catat waktu setelah enkripsi menggunakan chrono
+    // Record time after encryption
     auto end = high_resolution_clock::now();
 
-    // Hitung durasi enkripsi
+    // Calculate encryption duration
     auto encryptDuration = duration_cast<microseconds>(end - start).count();
 
-    // Print the encrypted ciphertext
+    // Print encrypted ciphertext
     Serial.print("Encrypted Data: ");
-    for (int i = 0; i < len; i++) {
-        Serial.print(ciphertext[i]);
+    for (int j = 0; j < len; j++) {
+        Serial.print(ciphertext[j], HEX);
         Serial.print(" ");
     }
     Serial.println();
 
-    // Tampilkan waktu komputasi
+    // Print encryption time computation
     Serial.print("Encryption Time Computation: ");
     Serial.print(encryptDuration);
-    Serial.println(" mikrosecond (μs)");   
-}
-
-
-void sendEncryptedMessage() {
-    const char *plaintext = "Hello ESP-8266!!!";
-    size_t len = strlen(plaintext);
-    
-    uint8_t ciphertext[len];
-
-    Serial.print("Original Data: ");
-    Serial.println(plaintext);
-
-    // Catat waktu sebelum enkripsi menggunakan chrono
-    auto start = high_resolution_clock::now();
-
-    // Proses enkripsi
-    chacha20EncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);
-
-    // Catat waktu setelah enkripsi menggunakan chrono
-    auto end = high_resolution_clock::now();
-
-    // Hitung durasi enkripsi
-    auto encryptDuration = duration_cast<microseconds>(end - start).count();
-
-    // Print the encrypted ciphertext
-    Serial.print("Encrypted Data: ");
-    for (int i = 0; i < len; i++) {
-        Serial.print(ciphertext[i]);
-        Serial.print(" ");
-    }
-    Serial.println();
-
-    // Tampilkan waktu komputasi
-    Serial.print("Encryption Time Computation: ");
-    Serial.print(encryptDuration);
-    Serial.println(" mikrosecond (μs)");    
-
-    // Kirim data terenkripsi
-    uint8_t sendStatus = esp_now_send(receiverMAC, ciphertext, len);
-    if (sendStatus == 0) {
-        Serial.println("Sent with success");
-    } else {
-        Serial.println("Error sending the data");
-        isPaired = false;
-    }
+    Serial.println(" microsecond (μs)");
 }
 
 void setup() {
@@ -205,43 +130,10 @@ void setup() {
     } else {
         Serial.println("Normal boot...");
     }
-    
-
-    WiFi.mode(WIFI_STA);
-
-    if (!initESPNow()) {
-        Serial.println("ESP-NOW initialization failed");
-        ESP.restart();
-    }
 }
 
 void loop() {
-    // unsigned long currentMillis = millis();
-
-    // if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
-    //     Serial.println("Attempting to pair...");
-    //     isPaired = pairWithPeer();
-    //     lastPairingAttempt = currentMillis;
-    // }
-
-    // if (isPaired) {
-    //     sendEncryptedMessage();
-    //     delay(1);     
-    //     // Masuk ke light sleep setelah mengirim
-    //     Serial.println("Entering light sleep for 3 seconds...");
-    //     // Light sleep dengan interval waktu
-    //     // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
-    //     WiFi.forceSleepBegin();
-    //     delay(3000);  // Light sleep selama 5 detik
-    //     WiFi.forceSleepWake(); // Wake up from light sleep
-    // }
-        encrypt();
-        delay(1);     
+        encrypt(0);
         // Masuk ke light sleep setelah mengirim
-        Serial.println("Entering light sleep for 3 seconds...");
-        // Light sleep dengan interval waktu
-        // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
-        WiFi.forceSleepBegin();
-        delay(3000);  // Light sleep selama 5 detik
-        WiFi.forceSleepWake(); // Wake up from light sleep
+delay(1000);
 }

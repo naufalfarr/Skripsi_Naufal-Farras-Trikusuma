@@ -179,7 +179,36 @@ void setup() {
     }
 }
 
+void measureThroughput() {
+    const size_t dataSize = 4192; // 8 KB of data untuk menghindari masalah RAM
+    char plaintext[dataSize];
+    char ciphertext[dataSize];
+
+    // Inisialisasi data dengan nilai tetap untuk stabilitas pengujian
+    memset(plaintext, 0xAA, dataSize);  // Mengisi data dengan pola yang sama
+
+    // Catat waktu sebelum enkripsi
+    auto start = high_resolution_clock::now();
+
+    // Proses enkripsi
+    chacha20EncryptDecrypt((const uint8_t *)plaintext, (uint8_t *)ciphertext, dataSize, key, nonce, counter);
+
+    // Catat waktu setelah enkripsi
+    auto end = high_resolution_clock::now();
+
+    // Hitung durasi dan throughput
+    auto duration = duration_cast<microseconds>(end - start).count();
+    double throughput = (double)dataSize / (duration / 1000000.0); // Bytes per second
+
+    // Tampilkan hasil throughput
+    Serial.print("Throughput: ");
+    Serial.print(throughput);
+    Serial.println(" bytes/second");
+}
+
 void loop() {
+  delay(3000);
+  
     unsigned long currentMillis = millis();
 
     if (!isPaired && (currentMillis - lastPairingAttempt >= pairingInterval)) {
@@ -189,14 +218,15 @@ void loop() {
     }
 
     if (isPaired) {
+        delay(500);
         sendEncryptedMessage();
         delay(1);     
         // Masuk ke light sleep setelah mengirim
-        Serial.println("Entering light sleep for 5 seconds...");
+        Serial.println("Entering light sleep for 3 seconds...");
         // Light sleep dengan interval waktu
         // Panggil WiFi.sleep() untuk menonaktifkan WiFi dan memasuki mode sleep
         WiFi.forceSleepBegin();
-        delay(5000);  // Light sleep selama 5 detik
+        delay(3000);  // Light sleep selama 3 detik
         WiFi.forceSleepWake(); // Wake up from light sleep
     }
 }

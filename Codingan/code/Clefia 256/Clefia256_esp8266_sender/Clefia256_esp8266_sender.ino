@@ -1,30 +1,21 @@
 #include <ESP8266WiFi.h>
 #include <espnow.h>
-#include <cstring>
-#include <stdint.h>
-#include <chrono>
-using namespace std::chrono;
+#include <Arduino.h>
 
-uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7};
-// Tambahkan fungsi callback untuk memeriksa status pengiriman
-void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
-    // Serial.print("Last Packet Send Status: ");
-    // Serial.println(sendStatus == 0 ? "Delivery Success" : "Delivery Fail");
+// Disable watchdog
+extern "C" {
+  #include "user_interface.h"
 }
 
-// Tambahkan fungsi untuk mengirim data terenkripsi dengan ESP-NOW
-void sendEncryptedMessage(uint8_t *ciphertext, size_t len) {
-    esp_now_send(receiverMAC, ciphertext, len);
-}
-
-
-// Constants for Clefia-256
+// Reduce buffer sizes
 const int CLEFIA_BLOCK_SIZE = 16;
 const int CLEFIA_KEY_SIZE = 32;
 const int CLEFIA_ROUNDS = 32;
 
-// Constants for Clefia-256
-const uint32_t con256[60] = {
+uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7};
+
+// Move constant arrays to PROGMEM to save RAM
+const PROGMEM uint32_t con256[60] = {
     0xf56b7aeb, 0x994a8a42, 0x96a4bd75, 0xfa854521,
     0x735b768a, 0x1f7abac4, 0xd5bc3b45, 0xb99d5d62,
     0x52d73592, 0x3ef636e5, 0xc57a1ac9, 0xa95b9b72,
@@ -42,8 +33,7 @@ const uint32_t con256[60] = {
     0x50b63150, 0x3c9757e7, 0x1052b098, 0x7c73b3a7
 };
 
-// S-box Clefia
-const uint8_t S0[256] = {
+const PROGMEM uint8_t S0[256] = {
     0x57, 0x49, 0xD1, 0xC6, 0x2E, 0x98, 0xFE, 0x4A, 0x96, 0x40, 0xC7, 0x9B, 0x6E, 0xB2, 0x42, 0x51,
     0xE5, 0x1A, 0xBC, 0x21, 0xDF, 0xB9, 0x3B, 0x0A, 0xD0, 0x31, 0xDC, 0x29, 0x16, 0x33, 0xC9, 0x53,
     0x28, 0x51, 0x46, 0x22, 0xDC, 0x78, 0x4E, 0xA4, 0x02, 0x95, 0x82, 0x2B, 0xD3, 0xFF, 0x9D, 0x6F,
@@ -62,8 +52,7 @@ const uint8_t S0[256] = {
     0xE8, 0x7D, 0x3B, 0xA2, 0x6C, 0x3C, 0x91, 0xBD, 0x41, 0xD6, 0x7F, 0x73, 0x3A, 0x04, 0xC3, 0xB0
 };
 
-
-const uint8_t S1[256] = {
+const PROGMEM uint8_t S1[256] = {
     0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
     0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
     0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
@@ -82,65 +71,103 @@ const uint8_t S1[256] = {
     0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D
 };
 
-
-// Utility functions
-uint32_t rotl(uint32_t x, int s) {
+// Helper functions with inline optimization
+inline uint32_t rotl(uint32_t x, int s) {
     return (x << s) | (x >> (32 - s));
 }
 
-uint32_t rotr(uint32_t x, int s) {
+inline uint32_t rotr(uint32_t x, int s) {
     return (x >> s) | (x << (32 - s));
 }
 
-// Clefia F-function
-void clefiaF(uint32_t *dst, const uint32_t *src, const uint32_t *rk, int offset) {
-    uint32_t x = src[0] ^ rk[offset];
-    uint32_t y = src[1];
-    uint32_t z = con256[offset];
-
-    y ^= rotr(x, 8) ^ rotl(x, 16) ^ rotl(x, 24);
-    x = ((uint32_t)S0[(uint8_t)(y)] << 24) | 
-        ((uint32_t)S1[(uint8_t)(y >> 8)] << 16) | 
-        ((uint32_t)S0[(uint8_t)(y >> 16)] << 8) | 
-        ((uint32_t)S1[(uint8_t)(y >> 24)]);
-    dst[0] = x ^ z;
-    dst[1] = y;
+// Read from PROGMEM helpers
+inline uint32_t pgm_read_con256(int index) {
+    return pgm_read_dword(&con256[index]);
 }
 
-// Key scheduling function for Clefia-256
-void clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
-    uint32_t L[16], R[4];
+inline uint8_t pgm_read_S0(int index) {
+    return pgm_read_byte(&S0[index]);
+}
+
+inline uint8_t pgm_read_S1(int index) {
+    return pgm_read_byte(&S1[index]);
+}
+
+void ICACHE_RAM_ATTR OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
+    // Minimal callback to avoid watchdog issues
+    static bool success = (sendStatus == 0);
+}
+
+void ICACHE_RAM_ATTR sendEncryptedMessage(uint8_t *ciphertext, size_t len) {
+    esp_now_send(receiverMAC, ciphertext, len);
+    delay(1); // Give some time for ESP-NOW
+}
+
+// Optimized F-function
+void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
+    uint32_t x = src[0] ^ pgm_read_con256(offset);
+    uint32_t y = src[1];
+    uint32_t z = pgm_read_con256(offset);
+
+    y ^= rotr(x, 8) ^ rotl(x, 16) ^ rotl(x, 24);
     
-    // Load key
-    for (int i = 0; i < 8; i++) {
-        L[i] = ((uint32_t)key[4*i] << 24) | ((uint32_t)key[4*i+1] << 16) |
-               ((uint32_t)key[4*i+2] << 8) | ((uint32_t)key[4*i+3]);
+    uint32_t temp = 0;
+    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 24))) << 0;
+    temp |= ((uint32_t)pgm_read_S1((uint8_t)(y >> 16))) << 8;
+    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 8))) << 16;
+    temp |= ((uint32_t)pgm_read_S1((uint8_t)y)) << 24;
+    
+    dst[0] = temp ^ z;
+    dst[1] = y;
+    
+    yield(); // Allow watchdog reset
+}
+
+// Optimized key scheduling
+void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
+    uint32_t L[4], R[4]; // Reduced array sizes
+    
+    // Load key with yield() calls
+    for (int i = 0; i < 4; i++) {
+        L[i] = ((uint32_t)key[4*i+3] << 24) | 
+               ((uint32_t)key[4*i+2] << 16) |
+               ((uint32_t)key[4*i+1] << 8) | 
+               ((uint32_t)key[4*i]);
+        yield();
     }
 
     // Generate round keys
-    for (int i = 0; i < CLEFIA_ROUNDS / 2; i++) {
-        R[0] = L[0]; R[1] = L[1]; R[2] = L[2]; R[3] = L[3];
-        clefiaF(&R[0], &R[2], &con256[4*i], 2*i);
-        clefiaF(&R[2], &R[0], &con256[4*i+2], 2*i+1);
-        rk[4*i] = R[0]; rk[4*i+1] = R[1]; rk[4*i+2] = R[2]; rk[4*i+3] = R[3];
-        if (i % 2 == 0) {
-            L[0] ^= rotl(R[0], 15); L[1] ^= rotl(R[1], 15);
-            L[2] ^= rotl(R[2], 15); L[3] ^= rotl(R[3], 15);
-        } else {
-            L[4] ^= rotl(R[0], 17); L[5] ^= rotl(R[1], 17);
-            L[6] ^= rotl(R[2], 17); L[7] ^= rotl(R[3], 17);
+    for (int i = 0; i < CLEFIA_ROUNDS / 4; i++) {
+        memcpy(R, L, 16);
+        
+        clefiaF(&R[0], &R[2], i*4);
+        clefiaF(&R[2], &R[0], i*4+2);
+        
+        for (int j = 0; j < 4; j++) {
+            rk[i*4 + j] = R[j];
         }
+        
+        if (i % 2 == 0) {
+            for (int j = 0; j < 4; j++) {
+                L[j] ^= rotl(R[j], 15);
+            }
+        } else {
+            for (int j = 0; j < 4; j++) {
+                L[j] ^= rotl(R[j], 17);
+            }
+        }
+        
+        yield(); // Allow watchdog reset
     }
 
-    // Additional whitening keys
-    rk[CLEFIA_ROUNDS] = L[0];
-    rk[CLEFIA_ROUNDS + 1] = L[1];
-    rk[CLEFIA_ROUNDS + 2] = L[2];
-    rk[CLEFIA_ROUNDS + 3] = L[3];
+    // Final round keys
+    for (int i = 0; i < 4; i++) {
+        rk[CLEFIA_ROUNDS + i] = L[i];
+    }
 }
 
-// Clefia-256 encryption function
-void clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32_t *rk) {
+// Optimized encryption function
+void ICACHE_RAM_ATTR clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32_t *rk) {
     uint32_t L[2], R[2], T[2];
     
     // Initial whitening
@@ -149,16 +176,16 @@ void clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32
     R[0] = plaintext[2] ^ rk[2];
     R[1] = plaintext[3] ^ rk[3];
     
-    // Perform CLEFIA_ROUNDS rounds of encryption
-    for (int i = 0; i < CLEFIA_ROUNDS; i++) {
-        clefiaF(T, L, rk, i);
-        T[0] ^= R[0]; T[1] ^= R[1];
+    // Main encryption loop with periodic yield()
+    for (int i = 0; i < CLEFIA_ROUNDS; i += 2) {
+        clefiaF(T, L, i);
+        T[0] ^= R[0];
+        T[1] ^= R[1];
         
-        // Swap L and R for the next round
-        R[0] = L[0];
-        R[1] = L[1];
-        L[0] = T[0];
-        L[1] = T[1];
+        memcpy(R, L, 8);
+        memcpy(L, T, 8);
+        
+        if (i % 8 == 0) yield(); // Periodic yield
     }
     
     // Final whitening
@@ -168,64 +195,71 @@ void clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32
     ciphertext[3] = R[1] ^ rk[CLEFIA_ROUNDS + 3];
 }
 
-void setup() {
-    Serial.begin(115200);
+void encryptMessage() {
+    static uint8_t originalMessage[CLEFIA_BLOCK_SIZE] = "Hello ESP-8266!";
+    static uint8_t ciphertext[CLEFIA_BLOCK_SIZE];
+    static uint32_t roundKeys[CLEFIA_ROUNDS + 4];
 
-    // Inisialisasi ESP-NOW
+    static const uint8_t key[CLEFIA_KEY_SIZE] = {
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
+        0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+    };
+
+    Serial.print(F("Original Message: "));
+    Serial.println((char*)originalMessage);
+
+    unsigned long start = micros();
+    
+    clefiaKeySchedule(roundKeys, key);
+    yield();
+    clefiaEncrypt((uint32_t*)ciphertext, (const uint32_t*)originalMessage, roundKeys);
+    
+    unsigned long duration = micros() - start;
+
+    Serial.print(F("Encrypted Message: "));
+    for (int i = 0; i < CLEFIA_BLOCK_SIZE; i++) {
+        if (ciphertext[i] < 0x10) Serial.print(F("0"));
+        Serial.print(ciphertext[i], HEX);
+        Serial.print(F(" "));
+    }
+    Serial.println();
+
+    Serial.print(F("Encryption Time (microseconds): "));
+    Serial.println(duration);
+
+    sendEncryptedMessage(ciphertext, CLEFIA_BLOCK_SIZE);
+}
+
+void setup() {
+    // Disable watchdog
+    ESP.wdtDisable();
+    ESP.wdtEnable(WDTO_8S);
+    
+    Serial.begin(115200);
+    while (!Serial) { yield(); }
+
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+
     if (esp_now_init() != 0) {
-        Serial.println("Error initializing ESP-NOW");
+        Serial.println(F("Error initializing ESP-NOW"));
         return;
     }
+    
     esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
     esp_now_register_send_cb(OnDataSent);
     esp_now_add_peer(receiverMAC, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
-
-    // Pesan asli yang akan dienkripsi
-    uint8_t originalMessage[] = "halo esp8266";
-    uint8_t ciphertext[CLEFIA_BLOCK_SIZE];
-    uint32_t roundKeys[60]; // Buffer untuk round keys
-
-    // Kunci enkripsi Clefia
-    uint8_t key[CLEFIA_KEY_SIZE] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
-                                    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
     
-    // Jadwalkan round keys
-    clefiaKeySchedule(roundKeys, key);
-
-    // Loop untuk mengirimkan data terenkripsi setiap 5 detik
-    while (true) {
-        // Mulai pengukuran waktu
-        auto start = high_resolution_clock::now();
-        
-        // Enkripsi pesan asli
-        clefiaEncrypt((uint32_t*)ciphertext, (const uint32_t*)originalMessage, (const uint32_t*)roundKeys);
-
-        // Tampilkan pesan asli, terenkripsi, dan waktu komputasi
-        Serial.print("Original Message: ");
-        Serial.println((char*)originalMessage);
-
-                // Akhiri pengukuran waktu
-        auto stop = high_resolution_clock::now();
-        auto duration = duration_cast<microseconds>(stop - start);
-
-        Serial.print("Encrypted Message: ");
-        for (int i = 0; i < CLEFIA_BLOCK_SIZE; i++) {
-            Serial.printf("%02X ", ciphertext[i]);
-        }
-        Serial.println();
-
-        Serial.print("Encryption Time (microseconds): ");
-        Serial.println(duration.count());
-
-        // Kirimkan pesan terenkripsi melalui ESP-NOW
-        sendEncryptedMessage(ciphertext, CLEFIA_BLOCK_SIZE);
-
-        // Tunggu 5 detik sebelum mengirim lagi
-        delay(5000);
-    }
+    Serial.println(F("Setup completed"));
 }
 
 void loop() {
-    // Tidak ada yang perlu dilakukan di loop
+    encryptMessage();
+        WiFi.forceSleepBegin();
+        delay(3000);  // Light sleep selama 5 detik
+        WiFi.forceSleepWake(); // Wake up from light sleep   
+    yield(); // Allow background tasks
 }

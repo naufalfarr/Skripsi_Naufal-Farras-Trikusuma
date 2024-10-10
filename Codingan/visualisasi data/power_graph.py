@@ -4,7 +4,7 @@ import matplotlib.ticker as ticker
 import mplcursors
 
 # Load data from CSV file
-df = pd.read_csv('sensor_data_aes.csv', parse_dates=['Timestamp'])
+df = pd.read_csv('sensor_data_clefia256.csv', parse_dates=['Timestamp'])
 
 # Convert the Timestamp column to datetime
 df['Timestamp'] = pd.to_datetime(df['Timestamp'])
@@ -19,7 +19,7 @@ plt.figure(figsize=(15, 6))
 line, = plt.plot(df['Time (s)'], df['Power (mW)'], label='Power (mW)', marker='o', linestyle='-')
 
 # Formatting the plot
-plt.title('Power Over Time (Per 500 ms)')
+plt.title('Power Over Time Clefia256')
 plt.xlabel('Time (s)')
 plt.ylabel('Power (mW)')
 plt.legend()

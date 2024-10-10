@@ -143,5 +143,5 @@ void loop() {
   }
 
   // Delay untuk jeda pembacaan data
-  delay(10);  // Simpan data setiap 10ms
+  delay(5);  // Simpan data setiap 10ms
 }
