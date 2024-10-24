@@ -12,7 +12,8 @@ const int CLEFIA_BLOCK_SIZE = 16;
 const int CLEFIA_KEY_SIZE = 32;
 const int CLEFIA_ROUNDS = 32;
 
-uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7};
+// uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7};
+uint8_t receiverMAC[] = {0x5C, 0xCF, 0x7F, 0x1B, 0x63, 0xD5};
 
 // Move constant arrays to PROGMEM to save RAM
 const PROGMEM uint32_t con256[60] = {
@@ -225,6 +226,13 @@ void encryptMessage() {
         Serial.print(F(" "));
     }
     Serial.println();
+    size_t plaintextSize = strlen((char*)originalMessage);
+    size_t ciphertextSize = sizeof(uint32_t) * (strlen((char*)originalMessage) / sizeof(uint32_t) + 1);    
+    Serial.print(F("Plaintext Size: "));
+    Serial.println(plaintextSize);
+    Serial.print(F("CipherText Size: "));
+    Serial.println(ciphertextSize);
+    
 
     Serial.print(F("Encryption Time (microseconds): "));
     Serial.println(duration);
@@ -252,7 +260,7 @@ void setup() {
     esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
     esp_now_register_send_cb(OnDataSent);
     esp_now_add_peer(receiverMAC, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
-    
+
     Serial.println(F("Setup completed"));
 }
 

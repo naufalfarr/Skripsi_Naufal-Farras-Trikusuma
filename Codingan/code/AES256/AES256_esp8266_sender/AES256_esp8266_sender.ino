@@ -73,7 +73,7 @@ bool pairWithReceiver() {
 }
 
 void sendEncryptedMessage() {
-    const char *plaintext = "30.40,71.7030.40,71.7030";
+    const char *plaintext = "Hello ESP-8266!!!";
     size_t len = strlen(plaintext);
 
     // Buat buffer untuk plaintext dengan padding
@@ -99,6 +99,8 @@ void sendEncryptedMessage() {
     // Tampilkan pesan asli dan ciphertext
     Serial.print("Original Data: ");
     Serial.println(plaintext);
+        Serial.print("Original Data Size: ");
+    Serial.println(len);
 
     Serial.print("Encrypted Data (Hex): ");
     for (int i = 0; i < paddedLen; i++) {
@@ -148,6 +150,9 @@ void encrypt() {
     // Tampilkan pesan asli dan ciphertext
     Serial.print("Original Data: ");
     Serial.println(plaintext);
+        Serial.print("Original Data Size: ");
+    Serial.println(len);
+
 
     Serial.print("Encrypted Data (Hex): ");
     for (int i = 0; i < paddedLen; i++) {
@@ -161,6 +166,7 @@ void encrypt() {
     Serial.print("Encryption Time Computation: ");
     Serial.print(encryptDuration);
     Serial.println(" microsecond (μs)");
+
 }
 
 void setup() {
@@ -180,9 +186,7 @@ void setup() {
 
 void loop() {
     // // Kirim pesan setiap 5 detik
-    // sendEncryptedMessage();
-    // delay(5000);
-        encrypt();
+    sendEncryptedMessage();
         delay(1);     
         // Masuk ke light sleep setelah mengirim
         Serial.println("Entering light sleep for 3 seconds...");

@@ -7,7 +7,7 @@ extern "C" {
   #include "user_interface.h"
 }
 
-// Constants
+// Reduce buffer sizes
 const int CLEFIA_BLOCK_SIZE = 16;
 const int CLEFIA_KEY_SIZE = 32;
 const int CLEFIA_ROUNDS = 32;
@@ -69,7 +69,7 @@ const PROGMEM uint8_t S1[256] = {
     0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D
 };
 
-// Helper functions
+// Helper functions with inline optimization
 inline uint32_t rotl(uint32_t x, int s) {
     return (x << s) | (x >> (32 - s));
 }
@@ -91,7 +91,7 @@ inline uint8_t pgm_read_S1(int index) {
     return pgm_read_byte(&S1[index]);
 }
 
-// F-function for decryption
+// Optimized F-function (same as in sender)
 void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
     uint32_t x = src[0] ^ pgm_read_con256(offset);
     uint32_t y = src[1];
@@ -100,7 +100,7 @@ void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
     y ^= rotr(x, 8) ^ rotl(x, 16) ^ rotl(x, 24);
     
     uint32_t temp = 0;
-    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 24)));
+    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 24))) << 0;
     temp |= ((uint32_t)pgm_read_S1((uint8_t)(y >> 16))) << 8;
     temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 8))) << 16;
     temp |= ((uint32_t)pgm_read_S1((uint8_t)y)) << 24;
@@ -108,10 +108,10 @@ void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
     dst[0] = temp ^ z;
     dst[1] = y;
     
-    yield(); // Allow watchdog reset
+    ESP.wdtFeed(); // Feed the watchdog
 }
 
-// Key scheduling for decryption
+// Optimized key scheduling with more frequent yields
 void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
     uint32_t L[4], R[4];
     
@@ -120,7 +120,7 @@ void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
                ((uint32_t)key[4*i+2] << 16) |
                ((uint32_t)key[4*i+1] << 8) | 
                ((uint32_t)key[4*i]);
-        yield();
+        ESP.wdtFeed();
     }
 
     for (int i = 0; i < CLEFIA_ROUNDS / 4; i++) {
@@ -143,7 +143,7 @@ void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
             }
         }
         
-        yield();
+        ESP.wdtFeed();
     }
 
     for (int i = 0; i < 4; i++) {
@@ -151,120 +151,88 @@ void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
     }
 }
 
-// Decryption function
+// Optimized decryption function with more frequent yields
 void ICACHE_RAM_ATTR clefiaDecrypt(uint32_t *plaintext, const uint32_t *ciphertext, const uint32_t *rk) {
     uint32_t L[2], R[2], T[2];
     
-    // Initial whitening (reverse order from encryption)
-    L[0] = ciphertext[0] ^ rk[CLEFIA_ROUNDS];
-    L[1] = ciphertext[1] ^ rk[CLEFIA_ROUNDS + 1];
-    R[0] = ciphertext[2] ^ rk[CLEFIA_ROUNDS + 2];
-    R[1] = ciphertext[3] ^ rk[CLEFIA_ROUNDS + 3];
+    R[0] = ciphertext[0] ^ rk[CLEFIA_ROUNDS];
+    R[1] = ciphertext[1] ^ rk[CLEFIA_ROUNDS + 1];
+    L[0] = ciphertext[2] ^ rk[CLEFIA_ROUNDS + 2];
+    L[1] = ciphertext[3] ^ rk[CLEFIA_ROUNDS + 3];
     
-    // Main decryption loop (reverse order)
     for (int i = CLEFIA_ROUNDS - 1; i >= 0; i -= 2) {
-        clefiaF(T, L, i);
-        T[0] ^= R[0];
-        T[1] ^= R[1];
+        clefiaF(T, R, i - 1);
+        T[0] ^= L[0];
+        T[1] ^= L[1];
         
-        memcpy(R, L, 8);
-        memcpy(L, T, 8);
+        memcpy(L, R, 8);
+        memcpy(R, T, 8);
         
-        if (i % 8 == 0) yield();
+        if (i % 4 == 0) ESP.wdtFeed(); // More frequent watchdog feeds
     }
     
-    // Final whitening
-    plaintext[0] = L[0] ^ rk[0];
-    plaintext[1] = L[1] ^ rk[1];
-    plaintext[2] = R[0] ^ rk[2];
-    plaintext[3] = R[1] ^ rk[3];
+    plaintext[0] = R[0] ^ rk[0];
+    plaintext[1] = R[1] ^ rk[1];
+    plaintext[2] = L[0] ^ rk[2];
+    plaintext[3] = L[1] ^ rk[3];
 }
 
-// Global variables for received data
-uint8_t receivedData[CLEFIA_BLOCK_SIZE];
-bool newDataReceived = false;
+// Global variables for round keys and received data
+static uint32_t roundKeys[CLEFIA_ROUNDS + 4];
+static uint8_t receivedData[CLEFIA_BLOCK_SIZE];
+static bool dataReceived = false;
 
-// Callback function to handle received data
 void ICACHE_RAM_ATTR OnDataRecv(uint8_t *mac_addr, uint8_t *data, uint8_t len) {
     if (len == CLEFIA_BLOCK_SIZE) {
         memcpy(receivedData, data, CLEFIA_BLOCK_SIZE);
-        newDataReceived = true;
+        dataReceived = true;
     }
+    ESP.wdtFeed();
 }
 
-void processReceivedData() {
-    if (!newDataReceived) return;
+void setup() {
+    ESP.wdtDisable();
+    ESP.wdtEnable(WDTO_8S);
     
+    Serial.begin(115200);
+    while (!Serial) { ESP.wdtFeed(); }
+
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+
+    if (esp_now_init() != 0) {
+        Serial.println("Error initializing ESP-NOW");
+        return;
+    }
+    
+    esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+    esp_now_register_recv_cb(OnDataRecv);
+
+    // Pre-compute round keys
     static const uint8_t key[CLEFIA_KEY_SIZE] = {
         0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF,
         0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
         0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
         0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
     };
-    
-    static uint32_t roundKeys[CLEFIA_ROUNDS + 4];
-    static uint8_t decryptedText[CLEFIA_BLOCK_SIZE + 1]; // +1 for null terminator
-    
-    // Print received encrypted data
-    Serial.print(F("Received Encrypted Data: "));
-    for (int i = 0; i < CLEFIA_BLOCK_SIZE; i++) {
-        if (receivedData[i] < 0x10) Serial.print(F("0"));
-        Serial.print(receivedData[i], HEX);
-        Serial.print(F(" "));
-    }
-    Serial.println();
-
-    unsigned long start = micros();
-    
-    // Decrypt the received data
     clefiaKeySchedule(roundKeys, key);
-    clefiaDecrypt((uint32_t*)decryptedText, (const uint32_t*)receivedData, roundKeys);
-    
-    unsigned long duration = micros() - start;
-    
-    // Ensure null termination for string
-    decryptedText[CLEFIA_BLOCK_SIZE] = '\0';
-    
-    // Print results
-    Serial.print(F("Decrypted Message: "));
-    Serial.println((char*)decryptedText);
-    Serial.print(F("Decryption Time (microseconds): "));
-    Serial.println(duration);
-    
-    newDataReceived = false;
-}
 
-void setup() {
-    // Disable watchdog
-    ESP.wdtDisable();
-    ESP.wdtEnable(WDTO_8S);
-    
-    Serial.begin(115200);
-    while (!Serial) { yield(); }
-
-    // Initialize WiFi in Station mode
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
-
-    // Initialize ESP-NOW
-    if (esp_now_init() != 0) {
-        Serial.println(F("Error initializing ESP-NOW"));
-        return;
-    }
-
-    // Set ESP-NOW role
-    esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
-    
-    // Register callback function for receiving data
-    esp_now_register_recv_cb(OnDataRecv);
-
-    Serial.println(F("Receiver Setup Completed"));
-    Serial.print(F("Receiver MAC Address: "));
-    Serial.println(WiFi.macAddress());
+    Serial.println("Receiver setup completed");
 }
 
 void loop() {
-    processReceivedData();
-    yield();
+    if (dataReceived) {
+        uint8_t decryptedMessage[CLEFIA_BLOCK_SIZE];
+        clefiaDecrypt((uint32_t*)decryptedMessage, (const uint32_t*)receivedData, roundKeys);
+
+        Serial.print("Decrypted Message: ");
+        Serial.write(decryptedMessage, CLEFIA_BLOCK_SIZE);
+        Serial.println();
+
+        dataReceived = false;
+    }
+    
+    ESP.wdtFeed();
+    delay(10); // Small delay to prevent tight looping
 }

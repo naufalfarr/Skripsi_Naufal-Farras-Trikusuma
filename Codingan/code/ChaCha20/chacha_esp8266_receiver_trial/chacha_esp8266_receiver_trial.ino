@@ -5,6 +5,9 @@
 #include <chrono>
 using namespace std::chrono;
 
+#define MAX_INPUT_SIZE 16384
+#define MAX_CHUNK_SIZE 250
+#define TIMEOUT_MS 100 // Timeout 100ms untuk mendeteksi akhir transmisi
 
 // Kunci 256-bit (32 byte)
 uint8_t key[32] = {
@@ -24,8 +27,16 @@ uint8_t nonce[12] = {
 // Counter
 uint32_t counter = 1;
 
+// Buffer dan variabel status
+uint8_t receivedData[MAX_INPUT_SIZE];
+size_t totalReceived = 0;
+unsigned long lastReceiveTime = 0;
+bool isReceiving = false;
+
+// Rotasi ke kiri
 #define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
 
+// Fungsi ChaCha quarter round
 void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
     a += b; d ^= a; d = ROTL(d, 16);
     c += d; b ^= c; b = ROTL(b, 12);
@@ -33,6 +44,7 @@ void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
     c += d; b ^= c; b = ROTL(b, 7);
 }
 
+// Fungsi untuk menghasilkan satu blok 64-byte
 void chacha20Block(uint32_t out[16], const uint32_t in[16]) {
     memcpy(out, in, sizeof(uint32_t) * 16);
     for (int i = 0; i < 10; i++) {
@@ -53,10 +65,10 @@ void chacha20Block(uint32_t out[16], const uint32_t in[16]) {
 
 void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], const uint8_t nonce[12], uint32_t counter) {
     uint32_t state[16] = {
-        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574, // Constant
-        ((uint32_t *)key)[0], ((uint32_t *)key)[1], ((uint32_t *)key)[2], ((uint32_t *)key)[3], 
-        ((uint32_t *)key)[4], ((uint32_t *)key)[5], ((uint32_t *)key)[6], ((uint32_t *)key)[7], 
-        counter, 
+        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
+        ((uint32_t *)key)[0], ((uint32_t *)key)[1], ((uint32_t *)key)[2], ((uint32_t *)key)[3],
+        ((uint32_t *)key)[4], ((uint32_t *)key)[5], ((uint32_t *)key)[6], ((uint32_t *)key)[7],
+        counter,
         ((uint32_t *)nonce)[0], ((uint32_t *)nonce)[1], ((uint32_t *)nonce)[2]
     };
 
@@ -66,65 +78,70 @@ void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, c
     while (i < len) {
         uint32_t outputBlock[16];
         chacha20Block(outputBlock, state);
-        state[12]++;  // Increment counter
+        state[12]++;
 
         for (size_t j = 0; j < 64 && i < len; ++j, ++i) {
             block[j] = ((uint8_t *)outputBlock)[j];
-            output[i] = input[i] ^ block[j];  // XOR dengan keystream
+            output[i] = input[i] ^ block[j];
         }
     }
 }
 
-void OnDataRecv(uint8_t *mac_addr, uint8_t *data, uint8_t len) {
-    char macStr[18];
-    snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
-             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-    
-    Serial.printf("Received data from: %s\n", macStr);
-    
-        // Print the received data (before decryption)
-    Serial.print("Received Data: ");
-    for (int i = 0; i < len; i++) {
-        Serial.print(data[i]);
-        Serial.print(" ");
-    }
-    Serial.println();
+void processReceivedData() {
+    if (totalReceived > 0) {
+        
+        
+        // Alokasikan memori untuk plaintext
+        uint8_t *plaintext = (uint8_t *)malloc(totalReceived + 1);
+        if (plaintext == nullptr) {
+            Serial.println("Memory allocation failed!");
+            return;
+        }
 
-    
-    if (len > 0) {
-      delay(1000);
-        uint8_t decryptedData[len];
+        Serial.print("Total Received Data Size: ");
+        Serial.print(totalReceived);
+        Serial.println(" Byte (B)");
+        delay(1000);        
+
         auto start = high_resolution_clock::now();
-        chacha20EncryptDecrypt(data, decryptedData, len, key, nonce, counter);
+        // Proses dekripsi
+        chacha20EncryptDecrypt(receivedData, plaintext, totalReceived, key, nonce, counter);
+        plaintext[totalReceived] = '\0';
+
         auto end = high_resolution_clock::now();
         auto decryptDuration = duration_cast<microseconds>(end - start).count();
 
         Serial.print("Decrypted Data: ");
-        for (int i = 0; i < len; i++) {
-            Serial.print((char)decryptedData[i]);
-        }
-        Serial.println();
-        Serial.print("Decryption Time Computation: ");
+        Serial.println((char*)plaintext);
+        Serial.print("Decryption Time: ");
         Serial.print(decryptDuration);
-        Serial.println(" mikrosecond (μs)");
-        Serial.println("------------------------------------------------"); 
-               
-    } else {
-        Serial.println("Error: Received data length is 0");
-        Serial.println("------------------------------------------------"); 
+        Serial.println(" microseconds");
+        Serial.println("------------------------------------------------");
+
+        // Reset untuk penerimaan berikutnya
+        totalReceived = 0;
+        isReceiving = false;
+        
+        free(plaintext);
+    }
+}
+
+void onDataReceived(uint8_t *mac_addr, uint8_t *data, uint8_t len) {
+    if (totalReceived + len <= MAX_INPUT_SIZE) {
+        memcpy(receivedData + totalReceived, data, len);
+        totalReceived += len;
+        lastReceiveTime = millis();
+        isReceiving = true;
     }
 }
 
 void setup() {
     Serial.begin(115200);
-    while (!Serial) {
-        ; // Wait for serial port to connect
-    }
-    
-    Serial.println("ESP-NOW Receiver Node");
-    
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
+
+    Serial.print("MAC Address: ");
+    Serial.println(WiFi.macAddress());
 
     if (esp_now_init() != 0) {
         Serial.println("Error initializing ESP-NOW");
@@ -132,14 +149,14 @@ void setup() {
     }
     
     esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
-    esp_now_register_recv_cb(OnDataRecv);
-
-    Serial.print("Receiver MAC Address: ");
-    Serial.println(WiFi.macAddress());
-    
-    Serial.println("Ready to receive data...");
+    esp_now_register_recv_cb(onDataReceived);
+    Serial.println("Receiver Ready");
 }
 
 void loop() {
-
+    // Cek timeout jika sedang menerima data
+    if (isReceiving && (millis() - lastReceiveTime > TIMEOUT_MS)) {
+        processReceivedData();
+    }
+    yield(); // Beri kesempatan untuk ESP8266 menangani background tasks
 }

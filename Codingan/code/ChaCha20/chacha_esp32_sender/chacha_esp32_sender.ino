@@ -119,7 +119,7 @@ bool pairWithPeer() {
 }
 
 void sendEncryptedMessage() {
-    const char *plaintext = "Hello ESP-8266!";
+    const char *plaintext = "Hello ESP-8266!!!";
     size_t len = strlen(plaintext);
     
     uint8_t ciphertext[len];
