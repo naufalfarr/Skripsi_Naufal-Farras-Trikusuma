@@ -22,9 +22,9 @@ const uint8_t nonce[16] = {
 uint32_t counter = 1; // Counter untuk enkripsi
 
 // Buffer untuk menyimpan data terfragmentasi
-uint8_t receivedData[10240]; // Maks 10KB data
-size_t totalDataLen = 0;     // Panjang total data diterima
-bool allFragmentsReceived = false; // Status apakah semua fragmen diterima
+uint8_t *receivedData = nullptr; // Buffer alokasi dinamis untuk data masuk
+size_t totalDataLen = 0;         // Panjang data total
+bool allFragmentsReceived = false; // Status penerimaan fragmen
 
 // Fungsi inisialisasi SNOW-V
 void initializeSnowV(uint32_t *LFSR, uint32_t *FSM) {
@@ -72,15 +72,26 @@ void onDataRecv(uint8_t *mac_addr, uint8_t *incomingData, uint8_t len) {
     uint8_t fragmentNum = incomingData[0]; // Nomor fragmen
     bool isLast = incomingData[1];         // Apakah ini fragmen terakhir
 
-    // Salin data ke buffer
-    memcpy(receivedData + (fragmentNum * 240), incomingData + 2, len - 2);
-    totalDataLen += (len - 2);
-
-    if (isLast) {
-        allFragmentsReceived = true;
+    // Alokasi buffer secara dinamis pada fragmen pertama
+    if (fragmentNum == 0) {
+        free(receivedData); // Bebaskan buffer lama jika ada
+        receivedData = (uint8_t *)malloc(15360); // Contoh, sesuaikan ukuran maksimal
+        totalDataLen = 0; // Reset panjang data
     }
 
-    Serial.printf("Received fragment %d, length: %d\n", fragmentNum, len);
+    if (receivedData != nullptr) {
+        // Salin data ke buffer
+        memcpy(receivedData + (fragmentNum * 240), incomingData + 2, len - 2);
+        totalDataLen += (len - 2);
+
+        if (isLast) {
+            allFragmentsReceived = true;
+        }
+
+        // Serial.printf("Received fragment %d, length: %d\n", fragmentNum, len);
+    } else {
+        Serial.println("Memory allocation failed!");
+    }
 }
 
 // Inisialisasi ESP-NOW
@@ -96,23 +107,32 @@ bool initESPNow() {
 
 // Fungsi untuk mendekripsi dan menampilkan pesan
 void processReceivedMessage() {
-    if (allFragmentsReceived) {
-      auto start = high_resolution_clock::now();
-        uint8_t decryptedData[totalDataLen + 1]; // +1 untuk null-terminator
-        snowVEncryptDecrypt(receivedData, decryptedData, totalDataLen);
-        decryptedData[totalDataLen] = '\0'; // Null-terminate string
-        auto end = high_resolution_clock::now();
+    if (allFragmentsReceived && receivedData != nullptr) {
+        Serial.printf("Total received data size: %d bytes\n", totalDataLen);
+        auto start = high_resolution_clock::now();
+        uint8_t *decryptedData = (uint8_t *)malloc(totalDataLen + 1); // Alokasi heap
+        if (decryptedData != nullptr) {
+            snowVEncryptDecrypt(receivedData, decryptedData, totalDataLen);
+            decryptedData[totalDataLen] = '\0'; // Null-terminate string
 
-        auto encryptDuration = duration_cast<microseconds>(end - start).count();
-        Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
-        
+            auto end = high_resolution_clock::now();
+            auto encryptDuration = duration_cast<microseconds>(end - start).count();
 
-        Serial.println("Decrypted Message:");
-        Serial.println((char *)decryptedData);
+            Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
+            Serial.println("Decrypted Message:");
+            Serial.println((char *)decryptedData);
+
+            free(decryptedData); // Bebaskan buffer setelah selesai
+        } else {
+            Serial.println("Decryption buffer allocation failed!");
+        }
 
         // Reset status untuk menerima pesan berikutnya
         totalDataLen = 0;
         allFragmentsReceived = false;
+        free(receivedData); // Bebaskan buffer setelah selesai
+        receivedData = nullptr;
+        Serial.println("------------------------------------------------");
     }
 }
 
@@ -127,5 +147,5 @@ void setup() {
 
 void loop() {
     processReceivedMessage();
-    delay(500); // Jeda kecil untuk menghindari loop berlebihan
+    delay(50); // Jeda kecil untuk menghindari loop berlebihan
 }

@@ -4,8 +4,14 @@
 #include <stdint.h>
 #include <chrono>
 using namespace std::chrono;
-#define MAX_INPUT_SIZE 16384
-#define MAX_CHUNK_SIZE 250
+
+// Variabel Global
+size_t totalChunks = 0;         // Jumlah total chunk
+size_t chunksAcked = 0;         // Jumlah chunk yang telah mendapat ACK
+bool allChunksSent = false;   // Status semua chunk terkirim
+bool status;
+const size_t MAX_CHUNK_SIZE = 250;  // Ukuran maksimal chunk ESP-NOW
+const size_t MAX_INPUT_SIZE = 16384;  // Batas input untuk pesan
     
 
 // MAC Address ESP8266 receiver (sesuaikan dengan MAC address receiver Anda)
@@ -29,10 +35,6 @@ uint8_t nonce[12] = {
 // Counter
 uint32_t counter = 1;
 
-// Variabel untuk manajemen koneksi
-bool isPaired = false;
-unsigned long lastPairingAttempt = 0;
-const unsigned long pairingInterval = 5000; // Coba pairing setiap 5 detik
 
 // Rotasi ke kiri
 #define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
@@ -89,15 +91,27 @@ void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, c
     }
 }
 
-void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
-    if (sendStatus != 0) {
-        isPaired = false; // Reset pairing status jika pengiriman gagal
+void onSend(uint8_t *mac_addr, uint8_t deliveryStatus) {
+  bool sendStatus;
+    if (deliveryStatus == 0) {  // Jika terkirim sukses
+        status = true;
+        chunksAcked++;  // Tambah counter ACK
+        // Serial.println("Chunk sent successfully");
+    } else {
+      status = false;
+        // Serial.println("Chunk send failed");
+    }
+
+    // Cek jika semua chunk sudah mendapat ACK
+    if (chunksAcked == totalChunks && deliveryStatus == 0) {
+        allChunksSent = true;
+        Serial.println("All chunks sent successfully");
     }
     
 }
 
 bool initESPNow() {
-    if (esp_now_init() != 0) { // ESP8266 menggunakan 0 sebagai indikator sukses
+    if (esp_now_init() != 0) {  // ESP8266 menggunakan 0 sebagai indikator sukses
         Serial.println("Error initializing ESP-NOW");
         return false;
     }
@@ -108,7 +122,7 @@ bool initESPNow() {
 
 bool pairWithPeer() {
     if (esp_now_is_peer_exist(receiverMAC)) {
-        return true; // Peer sudah ada
+        return true;  // Peer sudah ada
     }
 
     if (esp_now_add_peer(receiverMAC, ESP_NOW_ROLE_SLAVE, 1, NULL, 0) != 0) {
@@ -1075,33 +1089,34 @@ void sendEncryptedMessage() {
     // delay sblm Kirim data terenkripsi
     delay(2000);
     
- size_t totalChunks = (len + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;  // Hitung jumlah chunk
+ totalChunks = (len + MAX_CHUNK_SIZE - 1) / MAX_CHUNK_SIZE;
     Serial.print("Total Chunks: ");
     Serial.println(totalChunks);
 
+    chunksAcked = 0;  // Reset counter ACK
+
     for (size_t chunkIndex = 0; chunkIndex < totalChunks; ++chunkIndex) {
         size_t offset = chunkIndex * MAX_CHUNK_SIZE;
-        size_t chunkSize = min((size_t)MAX_CHUNK_SIZE, len - offset);  // Hitung ukuran chunk saat ini
+        size_t chunkSize = min((size_t)MAX_CHUNK_SIZE, len - offset);
 
-        // Kirim chunk menggunakan ESP-NOW
         uint8_t sendStatus = esp_now_send(receiverMAC, ciphertext + offset, chunkSize);
-
-        if (sendStatus == 0) {
-            // Serial.print("Chunk ");
-            // Serial.print(chunkIndex + 1);
-            // Serial.println(" sent successfully");
-        } else {
-            Serial.print("Error sending chunk ");
-            Serial.println(chunkIndex + 1);
-            isPaired = false;
-            break;  // Berhenti jika terjadi kesalahan
+        if (status == false) {
+            Serial.println("Chunk Send Failed");
+            free(ciphertext);
+            return;  // Hentikan pengiriman jika ada error
         }
 
-        delay(10);  // Beri jeda agar tidak overload
+        delay(10);  // Jeda agar tidak overload
     }
-    // free memory
-    free(ciphertext);
+
+    // Tunggu semua chunk dikirim dan di-ACK
+    while (!allChunksSent) {
+        delay(100);  // Polling setiap 100 ms
+    }
+
+    free(ciphertext);  // Bebaskan memori
 }
+
 void setup() {
     Serial.begin(115200);
     

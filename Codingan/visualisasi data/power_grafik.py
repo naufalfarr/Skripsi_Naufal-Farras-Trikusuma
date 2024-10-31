@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # Membaca file CSV
-df = pd.read_csv('snowv_real_2ms_10kb.csv', header=None, names=['Waktu', 'Power'])
+df = pd.read_csv('testing_batreaes.csv', header=None, names=['Waktu', 'Power'])
 
 # Membuat waktu dimulai dari 0 dengan interval 2 ms
 df['Waktu'] = range(0, len(df) * 2, 2)  # Waktu dimulai dari 0, interval 2 ms

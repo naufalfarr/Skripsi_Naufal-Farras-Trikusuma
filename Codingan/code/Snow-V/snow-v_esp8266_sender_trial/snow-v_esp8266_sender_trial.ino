@@ -6,6 +6,7 @@
 using namespace std::chrono;
 
 const uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7}; // Sesuaikan MAC address
+bool status;
 
 // Kunci 256-bit (32 byte)
 const uint8_t key[32] = {
@@ -66,7 +67,13 @@ void snowVEncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len) {
 
 // Callback ketika paket terkirim
 void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
-    Serial.println(sendStatus == 0 ? "Sent successfully" : "Send failed");
+    // Serial.println(sendStatus == 0 ? "Sent successfully" : "Send failed");
+    if (sendStatus == 0) {
+      status = true;
+    }
+    else {
+      status = false;
+    } 
 }
 
 // Inisialisasi ESP-NOW
@@ -106,9 +113,11 @@ void sendEncryptedMessage(const char *plaintext) {
 
     auto encryptDuration = duration_cast<microseconds>(end - start).count();
     Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
+    Serial.printf("Size of data: %d bytes\n", len);
 
     size_t offset = 0;
     uint8_t fragmentNum = 0;
+    size_t totalChunks = 0;
 
     delay(2000);
 
@@ -118,11 +127,19 @@ void sendEncryptedMessage(const char *plaintext) {
 
         sendFragment(ciphertext + offset, chunkSize, fragmentNum++, isLast);
         offset += chunkSize;
+        totalChunks++;  // Tambahkan jumlah chunk setiap kali
 
         delay(50);  // Jeda untuk memastikan stabilitas pengiriman
     }
-
-    delete[] ciphertext; // Bebaskan memori setelah digunakan
+    
+    if (status == true) {
+      Serial.println("Sent successfully");
+      Serial.printf("Total chunks sent: %d\n", totalChunks);
+    }
+    else if (status == false) {
+      Serial.println("Send Failed");      
+    }
+    free(ciphertext); // Bebaskan memori setelah digunakan
 }
 
 void setup() {

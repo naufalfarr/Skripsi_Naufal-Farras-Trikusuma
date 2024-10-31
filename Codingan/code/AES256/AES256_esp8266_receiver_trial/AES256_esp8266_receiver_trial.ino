@@ -95,12 +95,12 @@ void processData() {
     size_t decryptedLen = removePadding(decryptedData, receivedLen);
 
     
-    // // Print decrypted message
-    // Serial.println("Decrypted Data:");
-    // for (size_t i = 0; i < decryptedLen; i++) {
-    //     Serial.print((char)decryptedData[i]);
-    // }
-    // Serial.println();
+    // Print decrypted message
+    Serial.println("Decrypted Data:");
+    for (size_t i = 0; i < decryptedLen; i++) {
+        Serial.print((char)decryptedData[i]);
+    }
+    Serial.println();
 
     // Cleanup
     free(decryptedData);

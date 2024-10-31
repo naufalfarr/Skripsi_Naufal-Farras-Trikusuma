@@ -89,8 +89,6 @@ void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, c
 
 void processReceivedData() {
     if (totalReceived > 0) {
-        
-        
         // Alokasikan memori untuk plaintext
         uint8_t *plaintext = (uint8_t *)malloc(totalReceived + 1);
         if (plaintext == nullptr) {
