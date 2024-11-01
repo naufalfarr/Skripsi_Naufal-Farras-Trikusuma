@@ -1064,9 +1064,9 @@ void sendEncryptedMessage() {
     // ketika tes power tidak dijalankan karena sangat besar
     // Serial.print("Original Data: ");
     // Serial.println(plaintext);
-    Serial.print("Original Data Size: ");
-    Serial.print(len);
-    Serial.println(" Byte (B)");
+      Serial.print("Original Data Size: ");
+      Serial.print(len);
+      Serial.println(" Byte (B)");
 
     // Proses enkripsi
     chacha20EncryptDecrypt((const uint8_t *)plaintext, ciphertext, len, key, nonce, counter);

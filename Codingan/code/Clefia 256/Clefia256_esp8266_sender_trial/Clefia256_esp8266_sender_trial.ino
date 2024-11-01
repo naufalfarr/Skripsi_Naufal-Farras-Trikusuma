@@ -1,6 +1,10 @@
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 #include <Arduino.h>
+#include <cstring>
+#include <stdint.h>
+#include <chrono>
+using namespace std::chrono;
 
 // Configuration
 const int MAX_DATA_SIZE = 16384; // 16KB
@@ -8,6 +12,7 @@ const int ESP_NOW_MAX_PAYLOAD = 250; // ESP-NOW max packet size
 const int CLEFIA_BLOCK_SIZE = 16;
 const int CLEFIA_KEY_SIZE = 32;
 const int CLEFIA_ROUNDS = 32;
+bool status;
 
 // Forward declarations
 void clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32_t *rk);
@@ -267,16 +272,28 @@ bool processAndSendData(const uint8_t* data, size_t length) {
   };
   
   clefiaKeySchedule(roundKeys, key);
-  
+
+   auto encryptionStart = std::chrono::high_resolution_clock::now();
   // Encrypt data in blocks
   for (size_t i = 0; i < paddedSize; i += CLEFIA_BLOCK_SIZE) {
     encryptBlock(encryptionBuffer + i, dataBuffer + i, roundKeys);
     yield();
   }
+
+  auto encryptionEnd = std::chrono::high_resolution_clock::now();
+  auto encryptionDuration = std::chrono::duration_cast<std::chrono::microseconds>(encryptionEnd - encryptionStart).count();
+  Serial.print(F("Encrypted data size (bytes): "));
+  Serial.println(paddedSize);
+  Serial.print(F("Encryption time (microseconds): "));
+  Serial.println(encryptionDuration);
+
+  delay(2000);
   
   // Calculate number of packets needed
   const size_t dataPerPacket = ESP_NOW_MAX_PAYLOAD - sizeof(PacketHeader);
   const uint16_t totalPackets = (paddedSize + dataPerPacket - 1) / dataPerPacket;
+  Serial.print(F("Total Chunk: "));
+  Serial.println(totalPackets);
   
   // Send encrypted data in chunks
   transmissionInProgress = true;
@@ -323,6 +340,12 @@ bool processAndSendData(const uint8_t* data, size_t length) {
 // ESP-NOW callback
 void ICACHE_RAM_ATTR OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
     static bool success = (sendStatus == 0);
+    if (sendStatus == 0) {
+    status = true;      
+    }
+    else if (sendStatus == 0){
+        status = false;      
+    }
 }
 
 void setup() {
@@ -1260,20 +1283,19 @@ void loop() {
     size_t messageSize = strlen(message);
     
     // Print plain text and its size
-    Serial.print(F("Plain Text: "));
-    Serial.println(message);
-    Serial.print(F("Size of Plain Text: "));
-    Serial.println(messageSize);
+    Serial.print("Original Data Size: ");
+    Serial.print(messageSize);
+    Serial.println(" Byte (B)");
     
     // Check if there’s no ongoing transmission before sending
     if (!transmissionInProgress) {
         bool success = processAndSendData((uint8_t*)message, messageSize);
         
         // Print transmission status
-        if (success) {
-            Serial.println(F("Transmission successful"));
-        } else {
-            Serial.println(F("Transmission failed"));
+        if (status) {
+            Serial.println(F("Send successful"));
+        } else if (status == false){
+            Serial.println(F("Send failed"));
         }
     }
     Serial.println("------------------------------------------------");

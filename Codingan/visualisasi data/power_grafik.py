@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # Membaca file CSV
-df = pd.read_csv('testing_batreaes.csv', header=None, names=['Waktu', 'Power'])
+df = pd.read_csv('snowv_2ms_real_10kb.csv', header=None, names=['Waktu', 'Power'])
 
 # Membuat waktu dimulai dari 0 dengan interval 2 ms
 df['Waktu'] = range(0, len(df) * 2, 2)  # Waktu dimulai dari 0, interval 2 ms
@@ -15,7 +15,7 @@ fig, ax = plt.subplots(figsize=(10, 6))
 line, = ax.plot(df_filtered['Waktu'], df_filtered['Power'], marker='o', color='b', label='Power', linestyle='-')  # Marker 'o' untuk titik
 
 # Menambahkan judul dan label sumbu
-plt.title('Grafik Power per 2 ms', fontsize=16)
+plt.title('Grafik Power Enkripsi, Sampling per 2 ms (10KB Data)', fontsize=16)
 plt.xlabel('Waktu (ms)', fontsize=12)
 plt.ylabel('Power (mW)', fontsize=12)
 plt.grid(True)
