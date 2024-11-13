@@ -12,7 +12,7 @@ plt.bar(algorithms, average_times, color=['#4CAF50', '#2196F3', '#FFC107', '#FF5
 plt.xlabel('Encryption Algorithms')
 plt.ylabel('Average Computation Time in Microsecond (μs)')
 plt.title('Average Computation Time for Different Encryption Algorithms')
-plt.ylim(0, 450)
+plt.ylim(0, 100000)
 
 # Show the values on top of the bars
 for i, time in enumerate(average_times):

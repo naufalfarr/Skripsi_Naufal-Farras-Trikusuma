@@ -106,8 +106,7 @@ void onSend(uint8_t *mac_addr, uint8_t deliveryStatus) {
     if (chunksAcked == totalChunks && deliveryStatus == 0) {
         allChunksSent = true;
         Serial.println("All chunks sent successfully");
-    }
-    
+    }  
 }
 
 bool initESPNow() {
