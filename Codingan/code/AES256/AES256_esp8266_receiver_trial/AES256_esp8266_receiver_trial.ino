@@ -72,8 +72,6 @@ void onDataReceive(uint8_t *mac, uint8_t *incomingData, uint8_t len) {
 void processData() {
     if (receivedLen == 0) return; // No data to process
 
-    Serial.println("Processing full data after timeout.");
-
     // Allocate buffer for decrypted data
     uint8_t *decryptedData = (uint8_t *)malloc(receivedLen);
     if (!decryptedData) {
@@ -86,13 +84,20 @@ void processData() {
     // Decrypt the received data
     aes256Decrypt(receivedData, decryptedData, receivedLen, key);
     auto end = high_resolution_clock::now();
-    auto encryptDuration = duration_cast<microseconds>(end - start).count();  
-    Serial.print("Decryption Time Computation: ");
+    auto encryptDuration = duration_cast<microseconds>(end - start).count();
+
+    size_t decryptedLen = removePadding(decryptedData, receivedLen);
+    
+    Serial.print("Total Received Data Size: ");
+    Serial.print(decryptedLen);
+    Serial.println(" Byte (B)");      
+    
+    Serial.print("Decryption Time: ");
     Serial.print(encryptDuration);
     Serial.println(" microseconds (μs)");
 
     // Remove padding
-    size_t decryptedLen = removePadding(decryptedData, receivedLen);
+    
 
     
     // Print decrypted message

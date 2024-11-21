@@ -5,10 +5,10 @@
 #include <chrono>
 using namespace std::chrono;
 
-const uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7}; // Sesuaikan MAC address
+const uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7}; // MAC address
 bool status;
 
-// Kunci 256-bit (32 byte)
+// 256-bit (32-byte) key
 const uint8_t key[32] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -16,22 +16,22 @@ const uint8_t key[32] = {
     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-// Nonce 128-bit (16 byte)
+// 128-bit (16-byte) nonce
 const uint8_t nonce[16] = {
     0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4A,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-uint32_t counter = 1; // Counter untuk enkripsi
+uint32_t counter = 1;
 
-// Fungsi inisialisasi state SNOW-V
+// Initialize SNOW-V state
 void initializeSnowV(uint32_t *LFSR, uint32_t *FSM) {
-    memcpy(LFSR, key, 32);  // Salin kunci
-    memcpy(LFSR + 8, nonce, 16); // Salin nonce
-    memset(FSM, 0, 3 * sizeof(uint32_t));  // Inisialisasi FSM ke 0
+    memcpy(LFSR, key, 32);
+    memcpy(LFSR + 8, nonce, 16);
+    memset(FSM, 0, 3 * sizeof(uint32_t));
 }
 
-// Fungsi untuk menghasilkan keystream
+// Generate keystream
 void generateSnowVKeystream(uint32_t *LFSR, uint32_t *FSM, uint8_t *keystream, size_t len) {
     for (size_t i = 0; i < len; i += 4) {
         uint32_t f = (FSM[0] + LFSR[0]) ^ FSM[2];
@@ -49,7 +49,7 @@ void generateSnowVKeystream(uint32_t *LFSR, uint32_t *FSM, uint8_t *keystream, s
     }
 }
 
-// Fungsi enkripsi/dekripsi
+// Encrypt/Decrypt function
 void snowVEncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len) {
     uint32_t LFSR[12], FSM[3];
     initializeSnowV(LFSR, FSM);
@@ -65,18 +65,57 @@ void snowVEncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len) {
     }
 }
 
-// Callback ketika paket terkirim
-void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
-    // Serial.println(sendStatus == 0 ? "Sent successfully" : "Send failed");
-    if (sendStatus == 0) {
-      status = true;
-    }
-    else {
-      status = false;
-    } 
+// Encrypt plaintext
+uint8_t* encryptMessage(const char *plaintext, size_t &len) {
+    len = strlen(plaintext);
+    uint8_t *ciphertext = new uint8_t[len];
+    auto start = high_resolution_clock::now();
+    snowVEncryptDecrypt((const uint8_t *)plaintext, ciphertext, len);
+    auto end = high_resolution_clock::now();
+
+    auto encryptDuration = duration_cast<microseconds>(end - start).count();
+    Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
+    Serial.printf("Size of data: %d bytes\n", len);
+    return ciphertext;
 }
 
-// Inisialisasi ESP-NOW
+// Send encrypted fragments
+void sendEncryptedFragments(const uint8_t *ciphertext, size_t len) {
+    size_t offset = 0;
+    uint8_t fragmentNum = 0;
+    size_t totalChunks = 0;
+
+    while (offset < len) {
+        size_t chunkSize = (len - offset > 240) ? 240 : (len - offset);
+        bool isLast = (offset + chunkSize >= len);
+
+        sendFragment(ciphertext + offset, chunkSize, fragmentNum++, isLast);
+        offset += chunkSize;
+        totalChunks++;
+        delay(50);
+    }
+
+    if (status) {
+        Serial.println("Sent successfully");
+        Serial.printf("Total chunks sent: %d\n", totalChunks);
+    } else {
+        Serial.println("Send Failed");
+    }
+}
+
+// Fragment sender function
+void sendFragment(const uint8_t *data, size_t len, uint8_t fragmentNum, bool isLast) {
+    uint8_t buffer[250];
+    buffer[0] = fragmentNum;
+    buffer[1] = isLast ? 1 : 0;
+    memcpy(buffer + 2, data, len);
+
+    if (esp_now_send((uint8_t *)receiverMAC, buffer, len + 2) != 0) {
+        // Serial.println("Error sending fragment");
+    }
+}
+
+// Initialize ESP-NOW
 bool initESPNow() {
     if (esp_now_init() != 0) {
         Serial.println("Error initializing ESP-NOW");
@@ -87,61 +126,16 @@ bool initESPNow() {
     return true;
 }
 
-// Fungsi untuk mengirim fragmen data
-void sendFragment(const uint8_t *data, size_t len, uint8_t fragmentNum, bool isLast) {
-    uint8_t buffer[250]; // Maksimal 250 byte per paket
-    buffer[0] = fragmentNum;  // Nomor fragmen
-    buffer[1] = isLast ? 1 : 0; // Apakah ini fragmen terakhir
-
-    memcpy(buffer + 2, data, len);  // Salin data ke buffer
-
-    // Lakukan casting eksplisit pada receiverMAC agar sesuai tipe
-    if (esp_now_send((uint8_t *)receiverMAC, buffer, len + 2) != 0) {
-        Serial.println("Error sending fragment");
+// On send callback
+void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
+      if (sendStatus == 0) { 
+      status = 1;
+    } else {
+        status = 0;
     }
 }
 
-
-// Fungsi untuk mengirim pesan dengan fragmentasi
-void sendEncryptedMessage(const char *plaintext) {
-    size_t len = strlen(plaintext);
-    uint8_t *ciphertext = new uint8_t[len]; // Alokasi dinamis untuk ciphertext
-
-    auto start = high_resolution_clock::now();
-    snowVEncryptDecrypt((const uint8_t *)plaintext, ciphertext, len);
-    auto end = high_resolution_clock::now();
-
-    auto encryptDuration = duration_cast<microseconds>(end - start).count();
-    Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
-    Serial.printf("Size of data: %d bytes\n", len);
-
-    size_t offset = 0;
-    uint8_t fragmentNum = 0;
-    size_t totalChunks = 0;
-
-    delay(2000);
-
-    while (offset < len) {
-        size_t chunkSize = (len - offset > 240) ? 240 : (len - offset);
-        bool isLast = (offset + chunkSize >= len);
-
-        sendFragment(ciphertext + offset, chunkSize, fragmentNum++, isLast);
-        offset += chunkSize;
-        totalChunks++;  // Tambahkan jumlah chunk setiap kali
-
-        delay(50);  // Jeda untuk memastikan stabilitas pengiriman
-    }
-    
-    if (status == true) {
-      Serial.println("Sent successfully");
-      Serial.printf("Total chunks sent: %d\n", totalChunks);
-    }
-    else if (status == false) {
-      Serial.println("Send Failed");      
-    }
-    free(ciphertext); // Bebaskan memori setelah digunakan
-}
-
+// Setup function
 void setup() {
     Serial.begin(115200);
     WiFi.mode(WIFI_STA);
@@ -152,8 +146,9 @@ void setup() {
     }
 }
 
+// Main loop
 void loop() {
- const char *plaintext =
+    const char *plaintext =
       "30.80,73.80"
       "30.80,73.80"
       "30.80,73.80"
@@ -1064,8 +1059,12 @@ void loop() {
       "30.50,71.10"
       "30.50,71.10"
       "dataEnd";
-    sendEncryptedMessage(plaintext);
+
+    size_t len;
+    uint8_t *ciphertext = encryptMessage(plaintext, len);
+    sendEncryptedFragments(ciphertext, len);
+    delete[] ciphertext;
+
     Serial.println("------------------------------------------------");
-    delay(2000);  // Jeda antar pengiriman
-    
+    delay(2000);
 }
