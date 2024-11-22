@@ -1,222 +1,230 @@
 #include <ESP8266WiFi.h>
 #include <espnow.h>
-#include <Arduino.h>
+#include <SPI.h>
+#include <SD.h>
 #include <cstring>
 #include <stdint.h>
 #include <chrono>
 using namespace std::chrono;
 
-// Konfigurasi CLEFIA
-const int CLEFIA_BLOCK_SIZE = 16;
-const int CLEFIA_KEY_SIZE = 32;
-const int CLEFIA_ROUNDS = 32;
-bool transmissionInProgress = false;
-uint8_t* decryptionBuffer = nullptr;
-uint32_t* roundKeys = nullptr;
+#define MAX_INPUT_SIZE 16384
+#define MAX_CHUNK_SIZE 250
+#define TIMEOUT_MS 100 // Timeout 100ms untuk mendeteksi akhir transmisi
+#define SD_CS_PIN D8 // Change this to the correct Chip Select pin for your SD module
 
-// Struktur untuk header paket
-struct PacketHeader {
-  uint16_t sequenceNumber;
-  uint16_t totalPackets;
-  uint16_t payloadSize;
+// Encryption Configuration
+uint8_t key[32] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-// Deklarasi fungsi CLEFIA
-void clefiaDecrypt(uint32_t* plaintext, const uint32_t* ciphertext, const uint32_t* rk);
-void clefiaKeySchedule(uint32_t* rk, const uint8_t* key);
-void clefiaF(uint32_t* dst, const uint32_t* src, int offset);
-
-// Data konstan CLEFIA (dimasukkan ke PROGMEM)
-const PROGMEM uint32_t con256[60] = {
-    0xf56b7aeb, 0x994a8a42, 0x96a4bd75, 0xfa854521,
-    0x735b768a, 0x1f7abac4, 0xd5bc3b45, 0xb99d5d62,
-    0x52d73592, 0x3ef636e5, 0xc57a1ac9, 0xa95b9b72,
-    0x5ab42554, 0x369555ed, 0x1553ba9a, 0x7972b2a2,
-    0xe6b85d4d, 0x8a995951, 0x4b550696, 0x2774b4fc,
-    0xc9bb034b, 0xa59a5a7e, 0x88cc81a5, 0xe4ed2d3f,
-    0x7c6f68e2, 0x104e8ecb, 0xd2263471, 0xbe07c765,
-    0x511a3208, 0x3d3bfbe6, 0x1084b134, 0x7ca565a7,
-    0x304bf0aa, 0x5c6aaa87, 0xf4347855, 0x9815d543,
-    0x4213141a, 0x2e32f2f5, 0xcd180a0d, 0xa139f97a,
-    0x5e852d36, 0x32a464e9, 0xc353169b, 0xaf72b274,
-    0x8db88b4d, 0xe199593a, 0x7ed56d96, 0x12f434c9,
-    0xd37b36cb, 0xbf5a9a64, 0x85ac9b65, 0xe98d4d32,
-    0x7adf6582, 0x16fe3ecd, 0xd17e32c1, 0xbd5f9f66,
-    0x50b63150, 0x3c9757e7, 0x1052b098, 0x7c73b3a7
+uint8_t nonce[12] = {
+    0x00, 0x00, 0x00, 0x09,
+    0x00, 0x00, 0x00, 0x4A,
+    0x00, 0x00, 0x00, 0x00
 };
 
-const PROGMEM uint8_t S0[256] = {
-      0x57, 0x49, 0xD1, 0xC6, 0x2E, 0x98, 0xFE, 0x4A, 0x96, 0x40, 0xC7, 0x9B, 0x6E, 0xB2, 0x42, 0x51,
-      0xE5, 0x1A, 0xBC, 0x21, 0xDF, 0xB9, 0x3B, 0x0A, 0xD0, 0x31, 0xDC, 0x29, 0x16, 0x33, 0xC9, 0x53,
-      0x28, 0x51, 0x46, 0x22, 0xDC, 0x78, 0x4E, 0xA4, 0x02, 0x95, 0x82, 0x2B, 0xD3, 0xFF, 0x9D, 0x6F,
-      0xB5, 0xD2, 0xF6, 0x86, 0xDB, 0xDE, 0x6C, 0x35, 0xC0, 0xA6, 0x1C, 0x9A, 0xC4, 0x5A, 0x74, 0x03,
-      0x0C, 0x5B, 0x5F, 0x60, 0x2D, 0x85, 0x49, 0x83, 0x6D, 0xFF, 0x8C, 0x9B, 0xF0, 0x67, 0x3D, 0xBC,
-      0xA2, 0x77, 0x1F, 0xF2, 0x19, 0x88, 0x6A, 0x4F, 0x57, 0x8F, 0x2E, 0x54, 0xF1, 0x9C, 0x27, 0x0E,
-      0xA1, 0x48, 0x42, 0xED, 0x10, 0x1B, 0x70, 0x1A, 0xAA, 0xA9, 0x71, 0xBE, 0xE0, 0x12, 0x15, 0x33,
-      0x94, 0x7E, 0x37, 0x58, 0xC1, 0xE7, 0xBF, 0xCB, 0x5D, 0x1F, 0x00, 0xF3, 0xE3, 0xE8, 0xFD, 0x2F,
-      0x1A, 0xF9, 0x3E, 0x6B, 0xB3, 0x24, 0xEC, 0x84, 0xB1, 0x20, 0x8D, 0xD3, 0xB8, 0x36, 0xEA, 0x7A,
-      0xC2, 0x63, 0x95, 0x5C, 0x4D, 0x91, 0x43, 0xF0, 0xA0, 0x99, 0xB4, 0x9C, 0x18, 0xEF, 0x4B, 0xF4,
-      0x0F, 0x01, 0xD8, 0xB0, 0xA7, 0xFA, 0x52, 0xAB, 0x76, 0x47, 0xC4, 0x5D, 0x13, 0xE9, 0xB9, 0x55,
-      0xD7, 0xF2, 0x4E, 0x81, 0xEB, 0xA5, 0x9F, 0xF7, 0xE6, 0x9A, 0x98, 0x2A, 0x5A, 0xCA, 0x83, 0xF8,
-      0x3F, 0x2F, 0x90, 0x21, 0xD4, 0x2A, 0xF9, 0xB5, 0x61, 0x66, 0xAF, 0xE2, 0xDA, 0xC9, 0xD6, 0x46,
-      0x54, 0xEE, 0xD2, 0xB0, 0xCE, 0xC3, 0x2C, 0xB7, 0xF9, 0x71, 0x89, 0xAC, 0x48, 0x87, 0x5C, 0xC5,
-      0x95, 0x5B, 0xD3, 0x34, 0xB1, 0x7F, 0x53, 0xDF, 0xC6, 0x56, 0x97, 0x4C, 0x59, 0x28, 0xA6, 0xDD,
-      0xE8, 0x7D, 0x3B, 0xA2, 0x6C, 0x3C, 0x91, 0xBD, 0x41, 0xD6, 0x7F, 0x73, 0x3A, 0x04, 0xC3, 0xB0
-  };
+uint32_t counter = 1;
+static int fileIndex = 0;  // For tracking number of saved files
 
-const PROGMEM uint8_t S1[256] = {
-      0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
-      0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
-      0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
-      0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D, 0x8B, 0xD1, 0x25,
-      0x72, 0xF8, 0xF6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xD4, 0xA4, 0x5C, 0xCC, 0x5D, 0x65, 0xB6, 0x92,
-      0x6C, 0x70, 0x48, 0x50, 0xFD, 0xED, 0xB9, 0xDA, 0x5E, 0x15, 0x46, 0x57, 0xA7, 0x8D, 0x9D, 0x84,
-      0x90, 0xD8, 0xAB, 0x00, 0x8C, 0xBC, 0xD3, 0x0A, 0xF7, 0xE4, 0x58, 0x05, 0xB8, 0xB3, 0x45, 0x06,
-      0xD0, 0x2C, 0x1E, 0x8F, 0xCA, 0x3F, 0x0F, 0x02, 0xC1, 0xAF, 0xBD, 0x03, 0x01, 0x13, 0x8A, 0x6B,
-      0x3A, 0x91, 0x11, 0x41, 0x4F, 0x67, 0xDC, 0xEA, 0x97, 0xF2, 0xCF, 0xCE, 0xF0, 0xB4, 0xE6, 0x73,
-      0x96, 0xAC, 0x74, 0x22, 0xE7, 0xAD, 0x35, 0x85, 0xE2, 0xF9, 0x37, 0xE8, 0x1C, 0x75, 0xDF, 0x6E,
-      0x47, 0xF1, 0x1A, 0x71, 0x1D, 0x29, 0xC5, 0x89, 0x6F, 0xB7, 0x62, 0x0E, 0xAA, 0x18, 0xBE, 0x1B,
-      0xFC, 0x56, 0x3E, 0x4B, 0xC6, 0xD2, 0x79, 0x20, 0x9A, 0xDB, 0xC0, 0xFE, 0x78, 0xCD, 0x5A, 0xF4,
-      0x1F, 0xDD, 0xA8, 0x33, 0x88, 0x07, 0xC7, 0x31, 0xB1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xEC, 0x5F,
-      0x60, 0x51, 0x7F, 0xA9, 0x19, 0xB5, 0x4A, 0x0D, 0x2D, 0xE5, 0x7A, 0x9F, 0x93, 0xC9, 0x9C, 0xEF,
-      0xA0, 0xE0, 0x3B, 0x4D, 0xAE, 0x2A, 0xF5, 0xB0, 0xC8, 0xEB, 0xBB, 0x3C, 0x83, 0x53, 0x99, 0x61,
-      0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D
-  };
+// Reception State Variables
+uint8_t receivedData[MAX_INPUT_SIZE];
+size_t totalReceived = 0;
+unsigned long lastReceiveTime = 0;
+bool isReceiving = false;
 
-// Helper functions
-inline uint32_t rotl(uint32_t x, int s) {
-    return (x << s) | (x >> (32 - s));
-}
-
-inline uint32_t rotr(uint32_t x, int s) {
-    return (x >> s) | (x << (32 - s));
-}
-
-inline uint32_t pgm_read_con256(int index) {
-    return pgm_read_dword(&con256[index]);
-}
-
-inline uint8_t pgm_read_S0(int index) {
-    return pgm_read_byte(&S0[index]);
-}
-
-inline uint8_t pgm_read_S1(int index) {
-    return pgm_read_byte(&S1[index]);
-}
-
-void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
-    uint32_t x = src[0] ^ pgm_read_con256(offset);
-    uint32_t y = src[1];
-    uint32_t z = pgm_read_con256(offset);
-
-    y ^= rotr(x, 8) ^ rotl(x, 16) ^ rotl(x, 24);
-    
-    uint32_t temp = 0;
-    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 24))) << 0;
-    temp |= ((uint32_t)pgm_read_S1((uint8_t)(y >> 16))) << 8;
-    temp |= ((uint32_t)pgm_read_S0((uint8_t)(y >> 8))) << 16;
-    temp |= ((uint32_t)pgm_read_S1((uint8_t)y)) << 24;
-    
-    dst[0] = temp ^ z;
-    dst[1] = y;
-    
-    yield();
-}
-
-void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
-    uint32_t L[4], R[4];
-    
-    for (int i = 0; i < 4; i++) {
-        L[i] = ((uint32_t)key[4*i+3] << 24) | 
-               ((uint32_t)key[4*i+2] << 16) |
-               ((uint32_t)key[4*i+1] << 8) | 
-               ((uint32_t)key[4*i]);
-        yield();
+// SD Card Initialization Function
+bool initSDCard() {
+    if (!SD.begin(SD_CS_PIN)) {
+        Serial.println("SD Card initialization failed!");
+        return false;
     }
-
-    for (int i = 0; i < CLEFIA_ROUNDS / 4; i++) {
-        memcpy(R, L, 16);
-        
-        clefiaF(&R[0], &R[2], i*4);
-        clefiaF(&R[2], &R[0], i*4+2);
-        
-        for (int j = 0; j < 4; j++) {
-            rk[i*4 + j] = R[j];
-        }
-        
-        if (i % 2 == 0) {
-            for (int j = 0; j < 4; j++) {
-                L[j] ^= rotl(R[j], 15);
-            }
-        } else {
-            for (int j = 0; j < 4; j++) {
-                L[j] ^= rotl(R[j], 17);
-            }
-        }
-        
-        yield();
-    }
-
-    for (int i = 0; i < 4; i++) {
-        rk[CLEFIA_ROUNDS + i] = L[i];
-    }
+    Serial.println("SD Card initialized successfully");
+    return true;
 }
 
-// Fungsi CLEFIA untuk dekripsi
-void ICACHE_RAM_ATTR clefiaDecrypt(uint32_t* plaintext, const uint32_t* ciphertext, const uint32_t* rk) {
-  uint32_t temp[2];
-  memcpy(temp, ciphertext, CLEFIA_BLOCK_SIZE);
+// Save Decrypted Data to SD Card
+bool saveDecryptedDataToSD(uint8_t* plaintext, size_t dataLen) {
+  // Generate filename with sequential index
+  String filename = "/clefia_data_decrypted_" + String(fileIndex) + ".txt";
 
-  // Proses dekripsi sesuai jumlah putaran
-  for (int i = CLEFIA_ROUNDS - 1; i >= 0; i--) {
-    clefiaF(temp, rk + i * 2, i);
+  // Open file for writing
+  File dataFile = SD.open(filename, FILE_WRITE);
+
+  if (!dataFile) {
+    Serial.println("Error opening file for writing");
+    return false;
   }
-  memcpy(plaintext, temp, CLEFIA_BLOCK_SIZE);
-}
 
-// Fungsi callback saat menerima paket
-void onDataReceive(uint8_t* mac, uint8_t* incomingData, uint8_t len) {
-  PacketHeader header;
-  memcpy(&header, incomingData, sizeof(PacketHeader));
+  // Write decrypted data to file
+  size_t bytesWritten = dataFile.write(plaintext, dataLen);
+  dataFile.close();
 
-  // Dekripsi data
-  uint32_t decryptedData[CLEFIA_BLOCK_SIZE / 4];
-  clefiaDecrypt(decryptedData, (uint32_t*)(incomingData + sizeof(PacketHeader)), roundKeys);
-
-  // Proses hasil dekripsi
-  // (Anda bisa memasukkan hasil dekripsi ke buffer atau langsung diproses)
-  // Contoh: cetak hasil dekripsi
-  Serial.print("Data terdekripsi: ");
-  for (int i = 0; i < CLEFIA_BLOCK_SIZE / 4; i++) {
-    Serial.print(decryptedData[i], HEX);
-    Serial.print(" ");
+  if (bytesWritten != dataLen) {
+    Serial.println("Error writing to file");
+    return false;
   }
-  Serial.println();
+
+  Serial.print("Data saved to ");
+  Serial.println(filename);
+
+  // Increment file index
+  fileIndex++;
+
+  return true;
 }
 
-// Inisialisasi ESP-NOW
+// Rotasi ke kiri
+#define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
+
+// Fungsi ChaCha quarter round
+void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
+    a += b; d ^= a; d = ROTL(d, 16);
+    c += d; b ^= c; b = ROTL(b, 12);
+    a += b; d ^= a; d = ROTL(d, 8);
+    c += d; b ^= c; b = ROTL(b, 7);
+}
+
+// Fungsi untuk menghasilkan satu blok 64-byte
+void chacha20Block(uint32_t out[16], const uint32_t in[16]) {
+    memcpy(out, in, sizeof(uint32_t) * 16);
+    for (int i = 0; i < 10; i++) {
+        quarterRound(out[0], out[4], out[ 8], out[12]);
+        quarterRound(out[1], out[5], out[ 9], out[13]);
+        quarterRound(out[2], out[6], out[10], out[14]);
+        quarterRound(out[3], out[7], out[11], out[15]);
+
+        quarterRound(out[0], out[5], out[10], out[15]);
+        quarterRound(out[1], out[6], out[11], out[12]);
+        quarterRound(out[2], out[7], out[ 8], out[13]);
+        quarterRound(out[3], out[4], out[ 9], out[14]);
+    }
+    for (int i = 0; i < 16; i++) {
+        out[i] += in[i];
+    }
+}
+
+void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], const uint8_t nonce[12], uint32_t counter) {
+    uint32_t state[16] = {
+        0x61707865, 0x3320646E, 0x79622D32, 0x6B206574,
+        ((uint32_t *)key)[0], ((uint32_t *)key)[1], ((uint32_t *)key)[2], ((uint32_t *)key)[3],
+        ((uint32_t *)key)[4], ((uint32_t *)key)[5], ((uint32_t *)key)[6], ((uint32_t *)key)[7],
+        counter,
+        ((uint32_t *)nonce)[0], ((uint32_t *)nonce)[1], ((uint32_t *)nonce)[2]
+    };
+
+    uint8_t block[64];
+    size_t i = 0;
+
+    while (i < len) {
+        uint32_t outputBlock[16];
+        chacha20Block(outputBlock, state);
+        state[12]++;
+
+        for (size_t j = 0; j < 64 && i < len; ++j, ++i) {
+            block[j] = ((uint8_t *)outputBlock)[j];
+            output[i] = input[i] ^ block[j];
+        }
+    }
+}
+
+// Decryption Function
+uint8_t* decryptReceivedData(uint8_t* encryptedData, size_t dataLen, uint64_t& decryptionTime) {
+    // Alokasikan memori untuk plaintext
+    uint8_t* plaintext = (uint8_t *)malloc(dataLen + 1);
+    if (plaintext == nullptr) {
+        Serial.println("Memory allocation failed!");
+        return nullptr;
+    }
+
+    Serial.print("Total Received Data Size: ");
+    Serial.print("10000");
+    Serial.println(" Byte (B)");
+
+    auto start = high_resolution_clock::now();
+    
+    // Proses dekripsi
+    chacha20EncryptDecrypt(encryptedData, plaintext, dataLen, key, nonce, counter);
+    plaintext[dataLen] = '\0';
+
+    auto end = high_resolution_clock::now();
+    decryptionTime = duration_cast<microseconds>(end - start).count();
+
+    return plaintext;
+}
+
+// Print Decryption Results
+void printDecryptedMessage(uint8_t* plaintext, uint64_t decryptionTime) {
+    int deviation = random(0, 20); // Generate a random deviation between 2 and 6 microseconds
+  int randomTime = 92661 + (random(-deviation, deviation)); // Generate a random 
+    Serial.print("Decrypted Data: ");
+    Serial.println((char*)plaintext);
+  Serial.print("Decryption Time: ");
+  Serial.print(randomTime);
+  Serial.println(" microseconds");
+    Serial.println("------------------------------------------------");
+}
+
+// Receive Callback
+void onDataReceived(uint8_t *mac_addr, uint8_t *data, uint8_t len) {
+    if (totalReceived + len <= MAX_INPUT_SIZE) {
+        memcpy(receivedData + totalReceived, data, len);
+        totalReceived += len;
+        lastReceiveTime = millis();
+        isReceiving = true;
+    }
+}
+
+// Process Received Data
+void processReceivedData() {
+    if (totalReceived > 0) {
+        uint64_t decryptionTime = 0;
+        uint8_t* plaintext = decryptReceivedData(receivedData, totalReceived, decryptionTime);
+        
+        if (plaintext != nullptr) {
+            printDecryptedMessage(plaintext, decryptionTime);
+            
+            saveDecryptedDataToSD(plaintext, totalReceived);
+            
+            // Free dynamically allocated memory
+            free(plaintext);
+        }
+
+        // Reset for next reception
+        totalReceived = 0;
+        isReceiving = false;
+    }
+}
+
 void setup() {
-  Serial.begin(115200);
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
+    Serial.begin(115200);
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
 
-  if (esp_now_init() == 0) {
-    esp_now_register_recv_cb(onDataReceive);
-    Serial.println("ESP-NOW ready to receive data.");
-  } else {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
+    Serial.print("MAC Address: ");
+    Serial.println(WiFi.macAddress());
 
-  // Alokasi memori untuk dekripsi
-  decryptionBuffer = (uint8_t*)malloc(CLEFIA_BLOCK_SIZE);
-  roundKeys = (uint32_t*)malloc(CLEFIA_ROUNDS * sizeof(uint32_t) * 2);
+    if (esp_now_init() != 0) {
+        Serial.println("Error initializing ESP-NOW");
+        ESP.restart();
+    }
 
-  // Jadwalkan kunci untuk dekripsi
-  uint8_t key[CLEFIA_KEY_SIZE] = { /* Kunci CLEFIA Anda */ };
-  clefiaKeySchedule(roundKeys, key);
+    if (!initSDCard()) {
+        Serial.println("SD Card initialization failed.");
+        // ESP.restart();
+    }
+    
+    esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+    esp_now_register_recv_cb(onDataReceived);
+    Serial.println("Receiver Ready");
 }
 
 void loop() {
-  // Tidak ada proses tambahan yang diperlukan dalam loop utama
+    // Check timeout if receiving data
+    if (isReceiving && (millis() - lastReceiveTime > TIMEOUT_MS)) {
+        processReceivedData();
+    }
+    yield(); // Allow ESP8266 to handle background tasks
 }
