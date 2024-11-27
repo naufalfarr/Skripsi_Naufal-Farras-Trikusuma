@@ -7,13 +7,16 @@
 #include <stdint.h>
 #include <chrono>
 #include <SPI.h>
-
 using namespace std::chrono;
-#define SD_CS_PIN D8 // Change this to the correct Chip Select pin for your SD module
 
-// Constants and Variables
+#define SD_CS_PIN D8 
 const size_t BLOCK_SIZE = 16;
 const unsigned long TIMEOUT_MS = 100;
+uint8_t *receivedData = nullptr;
+size_t receivedLen = 0;
+size_t bufferSize = 0;
+unsigned long lastReceivedTime = 0;
+int fileIndex = 0; // File index for SD card files
 
 // AES Key and Initialization Vector (IV)
 const uint8_t key[32] = {
@@ -27,12 +30,6 @@ uint8_t iv[BLOCK_SIZE] = {
     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10
 };
-
-uint8_t *receivedData = nullptr;
-size_t receivedLen = 0;
-size_t bufferSize = 0;
-unsigned long lastReceivedTime = 0;
-int fileIndex = 0; // File index for SD card files
 
 // AES-256 CBC Decryption Function
 void aes256CbcDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], uint8_t iv[BLOCK_SIZE]) {
@@ -110,7 +107,7 @@ void processData() {
     Serial.print(decryptDuration);
     Serial.println(" microseconds");
 
-    Serial.print("Decrypted Data:");
+    Serial.print("Decrypted Data: ");
     for (size_t i = 0; i < decryptedLen; i++) {
         Serial.print((char)decryptedData[i]);
     }

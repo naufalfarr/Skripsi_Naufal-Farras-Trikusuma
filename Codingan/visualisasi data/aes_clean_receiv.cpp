@@ -7,12 +7,17 @@
 #include <stdint.h>
 #include <chrono>
 #include <SPI.h>
-
 using namespace std::chrono;
-#define SD_CS_PIN D8 
 
+#define SD_CS_PIN D8 
+uint8_t *receivedData = nullptr;
+size_t receivedLen = 0;
+size_t bufferSize = 0;
+unsigned long lastReceivedTime = 0;
+int fileIndex = 0; 
 const size_t BLOCK_SIZE = 16;
 const unsigned long TIMEOUT_MS = 100;
+
 const uint8_t key[32] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
@@ -20,18 +25,25 @@ const uint8_t key[32] = {
     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-uint8_t *receivedData = nullptr;
-size_t receivedLen = 0;
-size_t bufferSize = 0;
-unsigned long lastReceivedTime = 0;
-int fileIndex = 0; 
+uint8_t iv[BLOCK_SIZE] = {
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10
+};
 
-
-void aes256Decrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32]) {
+void aes256CbcDecrypt(const uint8_t *input, uint8_t *output, size_t len, const uint8_t key[32], uint8_t iv[BLOCK_SIZE]) {
     AES aes;
     aes.set_key(key, 32);
+    uint8_t currentIv[BLOCK_SIZE];
+    memcpy(currentIv, iv, BLOCK_SIZE); 
+
     for (size_t i = 0; i < len; i += BLOCK_SIZE) {
+        uint8_t tempCipher[BLOCK_SIZE];
+        memcpy(tempCipher, input + i, BLOCK_SIZE);
         aes.decrypt(input + i, output + i);
+        for (size_t j = 0; j < BLOCK_SIZE; ++j) {
+            output[i + j] ^= currentIv[j];
+        }
+        memcpy(currentIv, tempCipher, BLOCK_SIZE);
     }
 }
 
@@ -60,15 +72,16 @@ bool expandBuffer(size_t additionalSize) {
 
 void processData() {
     if (receivedLen == 0) return;
+
     uint8_t *decryptedData = (uint8_t *)malloc(receivedLen);
     if (!decryptedData) {
         Serial.println("Failed to allocate decryption buffer");
-        ESP.restart();
+        ESP.restart(); 
         return;
     }
 
     auto start = high_resolution_clock::now();
-    aes256Decrypt(receivedData, decryptedData, receivedLen, key);
+    aes256CbcDecrypt(receivedData, decryptedData, receivedLen, key, iv);
     auto end = high_resolution_clock::now();
     auto decryptDuration = duration_cast<microseconds>(end - start).count();
 
@@ -82,17 +95,14 @@ void processData() {
     Serial.print(decryptDuration);
     Serial.println(" microseconds");
 
-    Serial.print("Decrypted Data:");
+    Serial.print("Decrypted Data: ");
     for (size_t i = 0; i < decryptedLen; i++) {
         Serial.print((char)decryptedData[i]);
     }
     Serial.println();
 
-    if (saveDecryptedDataToSD(decryptedData, decryptedLen)) {
-        Serial.println("Decrypted data saved to SD card successfully.");
-    } else {
-        Serial.println("Failed to save decrypted data to SD card.");
-    }
+    saveDecryptedDataToSD(decryptedData, decryptedLen);
+
     free(decryptedData);
     free(receivedData);
     receivedData = nullptr;

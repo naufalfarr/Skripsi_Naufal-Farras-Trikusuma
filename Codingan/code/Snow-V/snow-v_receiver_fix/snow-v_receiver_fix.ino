@@ -145,7 +145,7 @@ void processReceivedMessage() {
     uint8_t *decryptedData = decryptReceivedData(decryptedLen);
 
     if (decryptedData != nullptr) {
-        Serial.println("Decrypted Message:");
+        Serial.print("Decrypted Message: ");
         Serial.println((char *)decryptedData);
 
         if (!saveDecryptedDataToSD(decryptedData, decryptedLen)) {

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <stdint.h>
 #include <chrono>
+#include "PlaintextData.h"
 using namespace std::chrono;
 
 const uint8_t receiverMAC[] = {0x84, 0xF3, 0xEB, 0x05, 0x50, 0xB7}; 
@@ -48,7 +49,6 @@ void generateSnowVKeystream(uint32_t *LFSR, uint32_t *FSM, uint8_t *keystream, s
 void snowVEncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len) {
     uint32_t LFSR[12], FSM[3];
     initializeSnowV(LFSR, FSM);
-
     uint8_t keystream[64];
     size_t i = 0;
 
@@ -66,10 +66,16 @@ uint8_t* encryptMessage(const char *plaintext, size_t &len) {
     auto start = high_resolution_clock::now();
     snowVEncryptDecrypt((const uint8_t *)plaintext, ciphertext, len);
     auto end = high_resolution_clock::now();
-
+    delay(2000);
     auto encryptDuration = duration_cast<microseconds>(end - start).count();
     Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
     Serial.printf("Size of data: %d bytes\n", len);
+    Serial.print("Encrypted Data: ");
+    for (size_t i = 0; i < len; i++) {
+        Serial.printf("%02X ", ciphertext[i]);
+    }
+    Serial.println();
+
     return ciphertext;
 }
 
@@ -85,7 +91,7 @@ void sendEncryptedFragments(const uint8_t *ciphertext, size_t len) {
         sendFragment(ciphertext + offset, chunkSize, fragmentNum++, isLast);
         offset += chunkSize;
         totalChunks++;
-        delay(50);
+        delay(1);
     }
 
     if (status) {
@@ -102,8 +108,8 @@ void sendFragment(const uint8_t *data, size_t len, uint8_t fragmentNum, bool isL
     buffer[1] = isLast ? 1 : 0;
     memcpy(buffer + 2, data, len);
 
-    if (esp_now_send((uint8_t *)receiverMAC, buffer, len + 2) != 0) {
-    }
+    esp_now_send((uint8_t *)receiverMAC, buffer, len + 2)
+
 }
 
 bool initESPNow() {
@@ -117,8 +123,8 @@ bool initESPNow() {
 }
 
 void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
-      if (sendStatus == 0) { 
-      status = 1;
+    if (sendStatus == 0) { 
+    status = 1;
     } else {
         status = 0;
     }
@@ -127,7 +133,6 @@ void onSend(uint8_t *mac_addr, uint8_t sendStatus) {
 void setup() {
     Serial.begin(115200);
     WiFi.mode(WIFI_STA);
-
     if (!initESPNow()) {
         Serial.println("ESP-NOW initialization failed");
         ESP.restart();
@@ -135,17 +140,10 @@ void setup() {
 }
 
 void loop() {
-    const char *plaintext =
-      "30.80,73.80"
-      "30.80,73.80"
-      "30.80,73.80"
-      "dataEnd";
-
     size_t len;
-    uint8_t *ciphertext = encryptMessage(plaintext, len);
+    uint8_t *ciphertext = encryptMessage(plaintextSets[2], len);
     sendEncryptedFragments(ciphertext, len);
     delete[] ciphertext;
-
     Serial.println("------------------------------------------------");
     delay(2000);
 }
