@@ -70,9 +70,9 @@ void processReceivedMessage() {
     if (!allFragmentsReceived || receivedData == nullptr) {
         return;
     }
-    if (!saveReceivedDataToSD(receivedData, totalDataLen)) {
-        Serial.println("Failed to save data to SD card");
-    }
+    // if (!saveReceivedDataToSD(receivedData, totalDataLen)) {
+    //     Serial.println("Failed to save data to SD card");
+    // }
 
     // Free the memory after processing
     free(receivedData);
@@ -100,10 +100,10 @@ void setup() {
     Serial.begin(115200);
     WiFi.mode(WIFI_STA);
 
-    if (!SD.begin(D8)) { // Initialize SD card on D8 pin
-        Serial.println("SD card initialization failed!");
-        return;
-    }
+    // if (!SD.begin(D8)) { // Initialize SD card on D8 pin
+    //     Serial.println("SD card initialization failed!");
+    //     return;
+    // }
 
     if (!initESPNow()) {
         Serial.println("ESP-NOW initialization failed");

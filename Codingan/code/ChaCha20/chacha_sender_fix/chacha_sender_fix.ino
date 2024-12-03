@@ -126,7 +126,8 @@ uint8_t* encryptMessage(const char* plaintext, size_t& encryptedLen, uint64_t& e
     Serial.print("Encryption Time Computation: ");
     Serial.print(encryptionTime);
     Serial.println(" microseconds (μs)");
-
+    Serial.print("Plaintext: ");
+    Serial.println(plaintext);
     Serial.print("Encrypted Data: ");
     for (size_t i = 0; i < len; ++i) {
         Serial.print(ciphertext[i], HEX);

@@ -84,7 +84,7 @@ uint8_t* encryptMessage(const char *plaintext, size_t &len) {
     // Print the ciphertext in hexadecimal format
     Serial.print("Encrypted Data: ");
     for (size_t i = 0; i < len; i++) {
-        Serial.printf("%02X ", ciphertext[i]); // Print each byte in hexadecimal
+        Serial.printf("%02X", ciphertext[i]); // Print each byte in hexadecimal
     }
     Serial.println(); // End the line after printing all bytes
 

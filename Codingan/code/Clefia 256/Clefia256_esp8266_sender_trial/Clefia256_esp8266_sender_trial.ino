@@ -323,7 +323,7 @@ bool processAndSendData(const uint8_t* data, size_t length) {
   delay(2000);
   Serial.print(F("Encrypted Data: "));
   for (size_t i = 0; i < paddedSize; i++) {
-    Serial.printf("%02X ", encryptionBuffer[i]); 
+    Serial.printf("%02X", encryptionBuffer[i]); 
   }
   Serial.println(); // Final line break after the last byte
   

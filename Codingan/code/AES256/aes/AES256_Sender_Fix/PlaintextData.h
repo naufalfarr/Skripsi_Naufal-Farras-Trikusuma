@@ -2,7 +2,7 @@
 #define PLAINTEXTDATA_H
 
 // Define multiple plaintext arrays
-const char* plaintextTesting = 
+const char* plaintextTesting  = 
     "Encryption and Decryption Testing";
 
 const char* plaintext10kb =
