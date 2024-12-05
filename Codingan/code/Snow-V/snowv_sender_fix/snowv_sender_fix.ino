@@ -81,6 +81,9 @@ uint8_t* encryptMessage(const char *plaintext, size_t &len) {
     Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
     Serial.printf("Size of data: %d bytes\n", len);
 
+    Serial.print("Encrypted Data: ");
+    Serial.println(plaintext);
+
     // Print the ciphertext in hexadecimal format
     Serial.print("Encrypted Data: ");
     for (size_t i = 0; i < len; i++) {

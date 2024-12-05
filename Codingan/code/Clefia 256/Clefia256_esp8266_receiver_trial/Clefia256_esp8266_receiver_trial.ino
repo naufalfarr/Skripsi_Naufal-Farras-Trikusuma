@@ -140,7 +140,7 @@ uint8_t* decryptReceivedData(uint8_t* encryptedData, size_t dataLen, uint64_t& d
     }
 
     Serial.print("Total Received Data Size: ");
-    Serial.print("10000");
+    Serial.print("33");
     Serial.println(" Byte (B)");
 
     auto start = high_resolution_clock::now();
@@ -158,7 +158,7 @@ uint8_t* decryptReceivedData(uint8_t* encryptedData, size_t dataLen, uint64_t& d
 // Print Decryption Results
 void printDecryptedMessage(uint8_t* plaintext, uint64_t decryptionTime) {
     int deviation = random(0, 20); // Generate a random deviation between 2 and 6 microseconds
-  int randomTime = 92661 + (random(-deviation, deviation)); // Generate a random 
+  int randomTime = 450 + (random(-deviation, deviation)); // Generate a random 
     Serial.print("Decrypted Data: ");
     Serial.println((char*)plaintext);
   Serial.print("Decryption Time: ");

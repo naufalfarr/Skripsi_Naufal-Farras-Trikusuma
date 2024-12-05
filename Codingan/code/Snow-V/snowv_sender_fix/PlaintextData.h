@@ -3,7 +3,7 @@
 
 // Define multiple plaintext arrays
 const char* plaintextTesting = 
-    "Encryption and Decryption TestingEncryption and Decryption TestingEncryption and Decryption TestingEncryption and Decryption Testing";
+    "Encryption and Decryption Testing";
 
 const char* plaintext10kb =
     "Data Suhu: "
