@@ -44,7 +44,7 @@ void aes256CbcEncrypt(const uint8_t *input, uint8_t *output, size_t len, const u
     AES aes;
     aes.set_key(key, 32);
     uint8_t currentIv[BLOCK_SIZE];
-    memcpy(currentIv, iv, BLOCK_SIZE); // Preserve original IV
+    memcpy(currentIv, iv, BLOCK_SIZE); // Preserves original IV
 
     for (size_t i = 0; i < len; i += BLOCK_SIZE) {
         // XOR with IV (or previous ciphertext)
