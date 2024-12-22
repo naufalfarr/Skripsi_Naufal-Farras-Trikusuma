@@ -30,10 +30,10 @@ bool allChunksSent = false;
 bool status = false;
 uint32_t counter = 1;
 
-// Rotasi ke kiri
+// Rotasi/menggeser bit ke kiri dan ke kanan
 #define ROTL(a,b) (((a) << (b)) | ((a) >> (32 - (b))))
 
-// Fungsi ChaCha quarter round
+// Fungsi ChaCha quarter round (penjumlahan dan xor)
 void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
     a += b; d ^= a; d = ROTL(d, 16);
     c += d; b ^= c; b = ROTL(b, 12);
@@ -41,15 +41,16 @@ void quarterRound(uint32_t &a, uint32_t &b, uint32_t &c, uint32_t &d) {
     c += d; b ^= c; b = ROTL(b, 7);
 }
 
-// Fungsi untuk menghasilkan satu blok 64-byte
+// Fungsi untuk menghasilkan keystream 64-byte
 void chacha20Block(uint32_t out[16], const uint32_t in[16]) {
-    memcpy(out, in, sizeof(uint32_t) * 16);
+    memcpy(out, in, sizeof(uint32_t) * 16); //copy state awal ke output
     for (int i = 0; i < 10; i++) {
+        //column round      
         quarterRound(out[0], out[4], out[ 8], out[12]);
         quarterRound(out[1], out[5], out[ 9], out[13]);
         quarterRound(out[2], out[6], out[10], out[14]);
         quarterRound(out[3], out[7], out[11], out[15]);
-
+        //diagonal round        
         quarterRound(out[0], out[5], out[10], out[15]);
         quarterRound(out[1], out[6], out[11], out[12]);
         quarterRound(out[2], out[7], out[ 8], out[13]);
@@ -69,12 +70,12 @@ void chacha20EncryptDecrypt(const uint8_t *input, uint8_t *output, size_t len, c
         counter, ((uint32_t *)nonce)[0], ((uint32_t *)nonce)[1], ((uint32_t *)nonce)[2]
     };
 
-    uint8_t block[64];
+    uint8_t block[64]; 
     size_t i = 0;
 
-    while (i < len) {
-        uint32_t outputBlock[16];
-        chacha20Block(outputBlock, state);
+    while (i < len) { 
+        uint32_t outputBlock[16]; //buffer keystream
+        chacha20Block(outputBlock, state); //generate keystream
         state[12]++;  // Increment counter
 
         for (size_t j = 0; j < 64 && i < len; ++j, ++i) {

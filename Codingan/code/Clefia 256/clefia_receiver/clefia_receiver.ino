@@ -22,7 +22,7 @@ uint32_t counter = 1;
 static int fileIndex = 0;
 
 // Variables for receiving data
-uint8_t receivedData[MAX_INPUT_SIZE];
+uint8_t* receivedData = nullptr;
 size_t totalReceived = 0;
 unsigned long lastReceiveTime = 0;
 bool isReceiving = false;
@@ -278,32 +278,13 @@ void processReceivedData() {
     // Update counter
     counter++;
 }
-void freeBuffers() {
-    if (receivedData) {
-        delete[] receivedData;
-       receivedData = nullptr;
-    }
-    if (decryptionBuffer) {
-        delete[] decryptionBuffer;
-        decryptionBuffer = nullptr;
-    }
-    if (roundKeys) {
-        delete[] roundKeys;
-        roundKeys = nullptr;
-    }
-    if (receivedPacketFlags) {
-        delete[] receivedPacketFlags;
-        receivedPacketFlags = nullptr;
-    }
-    
-    ESP.wdtFeed();
-    delay(0);
-}
+
 bool allocateBuffers(size_t size) {
     freeBuffers();
     
     size_t alignedSize = ((size + CLEFIA_BLOCK_SIZE - 1) / CLEFIA_BLOCK_SIZE) * CLEFIA_BLOCK_SIZE;
     
+    // Properly allocate memory using new
     receivedData = new uint8_t[alignedSize];
     decryptionBuffer = new uint8_t[alignedSize];
     roundKeys = new uint32_t[CLEFIA_ROUNDS + 4];
@@ -315,7 +296,27 @@ bool allocateBuffers(size_t size) {
     
     return true;
 }
-
+void freeBuffers() {
+    if (receivedData != nullptr) {
+        delete[] receivedData;
+        receivedData = nullptr;
+    }
+    if (decryptionBuffer != nullptr) {
+        delete[] decryptionBuffer;
+        decryptionBuffer = nullptr;
+    }
+    if (roundKeys != nullptr) {
+        delete[] roundKeys;
+        roundKeys = nullptr;
+    }
+    if (receivedPacketFlags != nullptr) {
+        delete[] receivedPacketFlags;
+        receivedPacketFlags = nullptr;
+    }
+    
+    ESP.wdtFeed();
+    delay(0);
+}
 // ESP-NOW callback
 
 void ICACHE_RAM_ATTR OnDataRecv(uint8_t *mac_addr, uint8_t *data, uint8_t len) {
