@@ -80,7 +80,7 @@ ciphertext = [
     "4C62258E3D4BC7E079B72AAD80DFA0A20393A7FAD8932E7A7D51A5013999E54AA0B6415F6C5C842D98EDD81BE647C3A9" #clefia
 ]
 
-# Initialize analyzer
+# Initialize analyzers
 analyzer = RandomnessAnalyzer()
 
 # Loop through each ciphertext and analyze
