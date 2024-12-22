@@ -14,7 +14,7 @@ const uint8_t key[32] = {
     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-const uint8_t nonce[16] = {
+const uint8_t iv[16] = {
     0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4A,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
@@ -28,7 +28,7 @@ int fileIndex = 0; // File index for saving decrypted data
 // Functions for encryption and decryption
 void initializeSnowV(uint32_t *LFSR, uint32_t *FSM) {
     memcpy(LFSR, key, 32);
-    memcpy(LFSR + 8, nonce, 16);
+    memcpy(LFSR + 8, iv, 16);
     memset(FSM, 0, 3 * sizeof(uint32_t));
 }
 

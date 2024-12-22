@@ -17,8 +17,8 @@ const uint8_t key[32] = {
     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F
 };
 
-// 128-bit (16-byte) nonce
-const uint8_t nonce[16] = {
+// 128-bit (16-byte) iv
+const uint8_t iv[16] = {
     0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x4A,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
@@ -28,7 +28,7 @@ uint32_t counter = 1;
 // Initialize SNOW-V state
 void initializeSnowV(uint32_t *LFSR, uint32_t *FSM) {
     memcpy(LFSR, key, 32);
-    memcpy(LFSR + 8, nonce, 16);
+    memcpy(LFSR + 8, iv, 16);
     memset(FSM, 0, 3 * sizeof(uint32_t));
 }
 
@@ -79,9 +79,9 @@ uint8_t* encryptMessage(const char *plaintext, size_t &len) {
     // Calculate and print encryption time
     auto encryptDuration = duration_cast<microseconds>(end - start).count();
     Serial.printf("Encryption Time: %ld microseconds\n", encryptDuration);
-    Serial.printf("Size of data: %d bytes\n", len);
+    Serial.printf("Plaintext Size: %d bytes\n", len);
 
-    Serial.print("Encrypted Data: ");
+    Serial.print("Plaintext: ");
     Serial.println(plaintext);
 
     // Print the ciphertext in hexadecimal format
@@ -160,7 +160,7 @@ void setup() {
 
 void loop() {
     size_t len;
-    uint8_t *ciphertext = encryptMessage(plaintextSets[0], len);
+    uint8_t *ciphertext = encryptMessage(plaintextSets[1], len);
     sendEncryptedFragments(ciphertext, len);
     delete[] ciphertext;
 

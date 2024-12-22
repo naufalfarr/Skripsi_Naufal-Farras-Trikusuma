@@ -148,19 +148,16 @@ void setup() {
 
 void loop() {
     
-    size_t plaintextSize = strlen(plaintextSets[0]);
+    size_t plaintextSize = strlen(plaintextSets[1]);
     size_t encryptedLen = 0;
     unsigned long encryptionTime = 0;
 
     // Encrypt the message
-    uint8_t *ciphertext = encryptMessage(plaintextSets[0], encryptedLen, encryptionTime);
+    uint8_t *ciphertext = encryptMessage(plaintextSets[1], encryptedLen, encryptionTime);
 
     if (ciphertext != nullptr) {
-        Serial.print("Encryption Time: ");
-        Serial.print(encryptionTime);
-        Serial.println(" microseconds (μs)");
         Serial.print("Plaintext:  ");
-        Serial.println(plaintextSets[0]);        
+        Serial.println(plaintextSets[1]);        
         Serial.print("Encrypted Data: ");
         for (size_t i = 0; i < encryptedLen; i++) {
             Serial.print(ciphertext[i], HEX); // Print each byte in hexadecimal
@@ -170,6 +167,9 @@ void loop() {
         Serial.print("Plaintext Size: ");
         Serial.print(plaintextSize);
         Serial.println(" Byte (B)");
+        Serial.print("Encryption Time: ");
+        Serial.print(encryptionTime);
+        Serial.println(" microseconds (μs)");
 
         Serial.print("Total Chunks: ");
         Serial.println(totalChunks);
