@@ -58,7 +58,7 @@ inline uint8_t pgm_read_S1(int index) {
     return pgm_read_byte(&clefia_s1[index]);
 }
 
-// Core CLEFIA Functions
+// Round Function
 void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
     uint32_t x = src[0] ^ pgm_read_con256(offset);
     uint32_t y = src[1];
@@ -78,6 +78,7 @@ void ICACHE_RAM_ATTR clefiaF(uint32_t *dst, const uint32_t *src, int offset) {
     yield();
 }
 
+//Membuat  round key (subkey dan whitening key)
 void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
     uint32_t L[8], KL[4], KR[4];
     
@@ -134,13 +135,13 @@ void ICACHE_RAM_ATTR clefiaKeySchedule(uint32_t *rk, const uint8_t *key) {
 void ICACHE_RAM_ATTR clefiaEncrypt(uint32_t *ciphertext, const uint32_t *plaintext, const uint32_t *rk) {
     uint32_t L[2], R[2], T[2];
     
-    // Initial whitening
+    // Initial whitening dan pembagian data input 
     L[0] = plaintext[0] ^ rk[0];
     L[1] = plaintext[1] ^ rk[1];
     R[0] = plaintext[2];
     R[1] = plaintext[3];
     
-    // Core encryption rounds
+    // feistel encryption rounds
     for (int i = 0; i < CLEFIA_ROUNDS; i += 2) {
         clefiaF(T, L, i + 4); // Offset by 4 to account for whitening keys
         T[0] ^= R[0];
